@@ -15,10 +15,23 @@ FLAGS.add_option('-i', '--iterations', type=int, metavar='I',
                  help='run the simulation for I total control iterations')
 FLAGS.add_option('-r', '--control-rate', type=float, default=20., metavar='N',
                  help='run the simulation at N control frames per second')
-FLAGS.add_option('-f', '--fixation-rate', type=int, metavar='M',
+FLAGS.add_option('-R', '--fixation-rate', type=int, metavar='M',
                  help='allow a fixation every M frames ; defaults to N / 3')
-FLAGS.add_option('-s', '--target-speed', type=float, default=5., metavar='S',
-                 help='set a target speed for the agent at S m/s')
+
+g = optparse.OptionGroup(FLAGS, 'Modules')
+g.add_option('-f', '--follow-threshold', type=float, default=2, metavar='S',
+             help='set the threshold variance for the follow module to S')
+g.add_option('-F', '--follow-noise', type=float, default=1.01, metavar='R',
+             help='set the noise for the follow module to R')
+g.add_option('-l', '--lane-threshold', type=float, default=4, metavar='S',
+             help='set the threshold variance for the lane module to S')
+g.add_option('-L', '--lane-noise', type=float, default=1.01, metavar='R',
+             help='set the noise for the lane module to R')
+g.add_option('-s', '--speed-threshold', type=float, default=3, metavar='S',
+             help='set the threshold variance for the speed module to S')
+g.add_option('-S', '--speed-noise', type=float, default=1.01, metavar='R',
+             help='set the noise for the speed module to R')
+FLAGS.add_option_group(g)
 
 
 class Simulator:
@@ -49,9 +62,9 @@ class Simulator:
 
         # create modules for the follower car.
         self.modules = [
-            modules.Speed(target_speed=opts.target_speed, threshold=6),
-            modules.Follow(threshold=3),
-            modules.Lane(tracks, threshold=4),
+            modules.Speed(threshold=opts.speed_threshold, noise=opts.speed_noise),
+            modules.Follow(threshold=opts.follow_threshold, noise=opts.follow_noise),
+            modules.Lane(tracks, threshold=opts.lane_threshold, noise=opts.lane_noise),
             ]
 
         # create the follower car, and position it behind the leader car.
@@ -73,6 +86,8 @@ class Simulator:
         If appropriate, choose the next look and print out a report line.
         '''
         self.frame += 1
+        if self.frame == self.opts.iterations:
+            raise StopIteration
         self.agent.move(self.dt)
         self.leader.move(self.dt)
         if not self.frame % self.look_interval:
@@ -83,15 +98,18 @@ class Simulator:
         '''Return a string capturing the measured state of the simulator.'''
         return '%s %s %s' % (
             numpy.linalg.norm(self.leader.target - self.agent.position),
-            self.agent.speed - self.opts.target_speed,
+            self.agent.speed,
             ' '.join(str(m.variance) for m in self.agent.modules),
             )
 
 
 def main(simulator):
     '''Run the simulator without a graphical interface.'''
-    while simulator.frame < (opts.iterations or sys.maxint):
-        simulator.step()
+    while True:
+        try:
+            simulator.step()
+        except StopIteration:
+            break
 
 
 if __name__ == '__main__':

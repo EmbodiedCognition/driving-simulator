@@ -103,7 +103,10 @@ def main(simulator):
         elapsed += dt
         while elapsed > simulator.dt:
             elapsed -= simulator.dt
-            simulator.step()
+            try:
+                simulator.step()
+            except StopIteration:
+                sys.exit()
             fig.redraw()
 
     @fig.event
