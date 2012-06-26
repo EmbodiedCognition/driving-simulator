@@ -1,3 +1,11 @@
+'''This file contains code for moving cars around the world.
+
+Cars live in a 2D world. They have cartesian positions in the world, and they
+represent their current velocity in car-centric polar coordinates, as a speed
+and angle. Using polar coordinates for the velocity helps keep the control
+signals straight.
+'''
+
 import math
 import numpy
 import numpy.random as rng
@@ -19,7 +27,7 @@ class Car(object):
 
     @property
     def velocity(self):
-        '''Compute the velocity using the current speed and angle.'''
+        '''Compute current velocity using current speed and angle.'''
         return self.speed * numpy.array(
             [numpy.cos(self.angle), numpy.sin(self.angle)])
 
@@ -44,7 +52,7 @@ class Car(object):
             self.angle = math.atan2(y, x) + 0.2 * rng.randn()
 
     def move(self, dt):
-        '''Move this car along a given slice of time.'''
+        '''Move this car through a given slice of time.'''
         ds, da = self.control(dt)
         ds = numpy.clip(ds, -MAX_PEDAL, MAX_PEDAL)
         da = numpy.clip(da, -MAX_STEER, MAX_STEER)
@@ -57,12 +65,15 @@ class Car(object):
         pass
 
     def draw(self, gfx, *color):
-        '''Draw this car as a cone.'''
+        '''Draw this car as a cone in the graphics visualization.'''
         gfx.draw_cone(color, self.position, self.velocity, self.speed)
 
 
 class Track(Car):
-    '''A track car just follows the samples that define a lane.'''
+    '''A track car follows a list of positions that define a lane.
+
+    The speed and angle for this car are determined by the points that make
+    '''
 
     def __init__(self, track):
         self.track = track
@@ -75,27 +86,24 @@ class Track(Car):
         return self.track[i]
 
     def reset(self, leader=None):
+        '''Move this car to the beginning of the lane.'''
         self.index = 50
-        self.position = self.track[0].copy()
-        self.speed = 0
-        dx, dy = self.track[1] - self.track[0]
-        self.angle = math.atan2(dy, dx)
+        self.move()
 
     def move(self, dt):
         self.index = (self.index + 1) % len(self.track)
-
         dx, dy = self.track[self.index] - self.position
-
-        theta = math.atan2(dy, dx)
-        theta = (theta + TAU / 2) % TAU - TAU / 2
-
         self.speed = math.sqrt(dx * dx + dy * dy)
-        self.angle = theta
-        self.position += dt * self.velocity
+        self.angle = math.atan2(dy, dx)
+        self.position = self.track[self.index].copy()
 
 
 class Modular(Car):
-    '''A modular car uses separate control modules for different driving tasks.
+    '''A modular car uses multiple control modules for different driving tasks.
+
+    The car is allowed to move in any direction on the 2D driving surface.
+    Modules for following a leader, controlling speed, and staying in a lane
+    tend to keep this car going in a reasonably lifelike manner.
     '''
 
     def __init__(self, modules):
@@ -134,17 +142,20 @@ class Modular(Car):
         return speed, angle
 
     def draw(self, gfx, *color):
-        '''Draw this car into the current OpenGL context.'''
+        '''Draw this car into the graphical visualization.'''
         speed, follow, lane = self.modules
 
         gfx.draw_cone((0.8, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
                       self.position, self.velocity, speed.est_speed)
 
+        # draw a red sphere at the estimate of the leader car's sweet spot.
         d = follow.est_distance
         a = follow.est_angle + self.angle
         gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
                         self.position + d * numpy.array([numpy.cos(a), numpy.sin(a)]))
 
+        # draw a green sphere near the driving agent to represent the estimated
+        # angle to the nearest lane.
         a = lane.est_angle + self.angle
         gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
                         self.position + 10 * numpy.array([numpy.cos(a), numpy.sin(a)]))

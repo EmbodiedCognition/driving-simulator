@@ -1,4 +1,15 @@
-'''This file contains classes for modeling state parameters and modules.'''
+'''This file contains classes for modeling state parameters and modules.
+
+The Estimator class represents a distribution over a scalar state variable
+(e.g., the distance to the leader car, or the current agent's speed).
+
+Estimators are grouped together in Modules, which use state variable estimates
+of various world values to generate control signals for a driving agent. This
+file contains implementations for three Modules, namely a Follow module (which
+helps a driving agent to follow a leader car), a Speed module (which tries to
+maintain a target speed), and a Lane module (which tries to keep the driving
+agent in the nearest lane).
+'''
 
 import collections
 import math
@@ -11,6 +22,7 @@ TAU = 2 * numpy.pi
 
 
 def pid_controller(kp=0., ki=0., kd=0., history=2):
+    '''This function creates a PID controller with the given constants.'''
     memory = collections.deque([0] * history, maxlen=max(2, history))
     def control(error, dt=1):
         memory.append(error)
@@ -21,9 +33,11 @@ def pid_controller(kp=0., ki=0., kd=0., history=2):
     return control
 
 
-def relative_angle(target, position, angle):
-    dx, dy = target - position
-    theta = math.atan2(dy, dx) - angle
+def relative_angle(target, source, heading):
+    '''Compute the relative angle from source to target, a value in [-PI, PI].
+    '''
+    dx, dy = target - source
+    theta = math.atan2(dy, dx) - heading
     return (theta + TAU / 2) % TAU - TAU / 2
 
 
@@ -67,13 +81,13 @@ class Estimator:
     def salience(self):
         '''Salience is exp(sigma^2 - threshold).
 
-        This value is small for variance below the threshold, and extremely
-        large for variances exceeding the threshold.
+        This value is small for variance below the threshold, and large for
+        variance exceeding the threshold.
         '''
         return numpy.exp(self._variance - self._threshold)
 
     def resample(self):
-        '''Store a new sample, to be used within a time slice.'''
+        '''Store a new sample, usually to be used within a time slice.'''
         self.value = self.sample()
 
     def sample(self):
@@ -103,9 +117,22 @@ class Estimator:
 
 
 class Module:
-    '''A module uses a bunch of state estimates to issue control signals.
+    '''A module uses a set of state estimates to issue control signals.
 
     Estimates of state values are handled by the Estimator class.
+
+    This class contains wrapper methods that allow handling all of the set of
+    estimators in a straightforward way ; for example, the reset() method resets
+    all the estimators in the module.
+
+    This class also contains some higher-level methods for providing control
+    signals to a driving agent (the control() and _control() methods), and for
+    incorporating state updates based on observations of the world (the update()
+    and _update() methods).
+
+    In the driving simulator, there are really only ever three types of state
+    variable estimates -- distance, speed, and angle. These are used in some
+    combination in each of the Follow, Lane, and Speed modules below.
     '''
 
     def __init__(self, *args, **kwargs):
@@ -115,44 +142,64 @@ class Module:
 
     @property
     def est_distance(self):
+        '''Return the estimated distance for this module, if any.'''
         return self.estimators['distance'].value
 
     @property
     def est_speed(self):
+        '''Return the estimated speed for this module, if any.'''
         return self.estimators['speed'].value
 
     @property
     def est_angle(self):
+        '''Return the estimated angle for this module, if any.'''
         return self.estimators['angle'].value
 
     @property
     def variance(self):
+        '''Return the max (TODO: mean ?) variance of all estimators.'''
         return max(e.variance for e in self.estimators.itervalues())
 
     @property
     def salience(self):
+        '''Return the max (TODO: mean ?) salience of all estimators.'''
         return max(e.salience for e in self.estimators.itervalues())
 
     def reset(self):
+        '''Reset all estimators.'''
         [e.reset() for e in self.estimators.itervalues()]
 
     def update(self, agent, leader):
+        '''Update this module given the true states of the agent and leader.'''
         values = dict(self._update(agent, leader))
         for name, est in self.estimators.iteritems():
             est.reset(values.get(name, 0))
 
     def control(self, dt):
+        '''Provide a control signal using current state estimates.'''
         for name, est in self.estimators.iteritems():
             est.decay()
             est.resample()
         return self._control(dt)
 
-    def dead_reckon(self, dt, speed, angle):
+    def dead_reckon(self, dt, pedal, steer):
+        '''Update state estimates based on control signals.
+
+        This method basically updates the means of any relevant state estimates,
+        based on the control signals that the driving agent is using to navigate
+        around the world. It's akin to dead-reckoning in navigation, where the
+        pilot uses estimates of current velocity and time to keep track of
+        distance traveled.
+        '''
         pass
 
 
 class Follow(Module):
-    '''This module attempts to follow a leader car.'''
+    '''This module attempts to follow a leader car.
+
+    Relevant state variables for this task are the distance to the leader car,
+    and the relative angle to the leader car.
+    '''
 
     def _setup(self, threshold):
         '''Create PID controllers for distance and angle.'''
@@ -171,13 +218,19 @@ class Follow(Module):
         '''Issue PID control signals for distance and angle.'''
         return self._pedal(self.est_distance), self._steer(self.est_angle)
 
-    def dead_reckon(self, dt, speed, angle):
+    def dead_reckon(self, dt, pedal, steer):
+        '''Incorporate pedal and steering changes into state estimates.'''
+        self.estimators['distance'] -= dt * numpy.clip(
+            pedal, -cars.MAX_PEDAL, cars.MAX_PEDAL)
         self.estimators['angle'] -= dt * numpy.clip(
-            angle, -cars.MAX_STEER, cars.MAX_STEER)
+            steer, -cars.MAX_STEER, cars.MAX_STEER)
 
 
 class Speed(Module):
-    '''This module attempts to maintain a specific target speed.'''
+    '''This module attempts to maintain a specific target speed.
+
+    The relevant state variable for this task is the driving agent's speed.
+    '''
 
     def _setup(self, target_speed, threshold):
         '''Set up this module with the target speed.'''
@@ -193,13 +246,17 @@ class Speed(Module):
         '''Return the delta between target and current speeds as a control.'''
         return self._pedal(self.est_speed - self.target_speed), None
 
-    def dead_reckon(self, dt, speed, angle):
+    def dead_reckon(self, dt, pedal, steer):
+        '''Incorporate the change in speed into the state estimate.'''
         self.estimators['speed'] -= dt * numpy.clip(
-            speed, -cars.MAX_PEDAL, cars.MAX_PEDAL)
+            pedal, -cars.MAX_PEDAL, cars.MAX_PEDAL)
 
 
 class Lane(Module):
-    '''This module tries to keep the car in one of the available lanes.'''
+    '''This module tries to keep the car in one of the available lanes.
+
+    The relevant state variable for this task is the angle to the nearest lane.
+    '''
 
     def _setup(self, lanes, threshold):
         '''Set up this module by providing the locations of lanes.'''
@@ -218,6 +275,7 @@ class Lane(Module):
         '''Return the most recent steering signal for getting back to a lane.'''
         return None, self._steer(self.est_angle)
 
-    def dead_reckon(self, dt, speed, angle):
+    def dead_reckon(self, dt, pedal, steer):
+        '''Update the angle to a lane using the current steering command.'''
         self.estimators['angle'] -= dt * numpy.clip(
-            angle, -cars.MAX_STEER, cars.MAX_STEER)
+            steer, -cars.MAX_STEER, cars.MAX_STEER)

@@ -1,3 +1,5 @@
+'''This file contains code for displaying the simulation graphically.'''
+
 import glumpy
 import math
 import OpenGL.GL as gl

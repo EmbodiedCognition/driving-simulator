@@ -8,7 +8,7 @@ import cars
 import lanes
 import modules
 
-FLAGS = optparse.OptionParser()
+FLAGS = optparse.OptionParser('Usage: main.py [options] [lane-files]')
 FLAGS.add_option('-g', '--gl', action='store_true',
                  help='run the simulator with the OpenGL visualization')
 FLAGS.add_option('-i', '--iterations', type=int, metavar='I',
@@ -22,7 +22,12 @@ FLAGS.add_option('-s', '--target-speed', type=float, default=5., metavar='S',
 
 
 class Simulator:
-    '''The simulator encapsulates the state of all cars and modules.'''
+    '''The simulator encapsulates the state of all cars and modules.
+
+    It's used as a convenient wrapper to step through the simulation by updating
+    the positions and velocities of the cars in the world, as well as their
+    estimates of world state (if any).
+    '''
 
     def __init__(self, opts, args):
         self.opts = opts
@@ -84,6 +89,7 @@ class Simulator:
 
 
 def main(simulator):
+    '''Run the simulator without a graphical interface.'''
     while simulator.frame < (opts.iterations or sys.maxint):
         simulator.step()
 

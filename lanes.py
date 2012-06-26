@@ -1,3 +1,5 @@
+'''This file contains code for importing or generating lane position data.'''
+
 import numpy
 
 TAU = 2 * numpy.pi
