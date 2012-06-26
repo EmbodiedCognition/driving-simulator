@@ -48,19 +48,21 @@ class Estimator:
     whenever the system does not allocate a look, estimates grow in uncertainty.
 
     Estimates are centered around some mean value, which can be updated (using
-    the += and -= operators) using the control signals (aka dead-reckoning).
+    the inc() and set() methods) using the control signals (aka dead-reckoning).
     '''
 
-    def __init__(self, threshold, scale=0.001, noise=1.01):
+    def __init__(self, scale, threshold, noise):
         '''Initialize this estimator.
+
+        scale: Indicates how much to scale the variance for the estimate. This
+          is here to make sure different variance values are commensurate with
+          the inherent variance that we consider acceptable for whatever units
+          this state variable is measured in.
 
         threshold: Indicates the maximum tolerated variance in the estimate
           before this value becomes a candidate for a look.
 
-        scale: Indicates how much to scale the variance for the estimate.
-          Usually around 1e-3.
-
-        noise: The exponential time constant for uncertainty growth.
+        noise: The exponential time constant for variance growth.
         '''
         self._threshold = threshold
         self._scale = scale
@@ -92,7 +94,7 @@ class Estimator:
 
     def sample(self):
         '''Draw a sample from our state value distribution.'''
-        return self._mean + self._scale * rng.normal(0, self._variance)
+        return rng.normal(self._mean, self._scale * self._variance)
 
     def decay(self):
         '''Increase the variance by the noise in this system.'''
@@ -103,17 +105,14 @@ class Estimator:
         self._mean = mean
         self._variance = 1
 
-    def __isub__(self, delta):
-        '''Subtract the given change from our current mean and value.'''
-        self._mean -= delta
-        self.value -= delta
-        return self
+    def set(self, value):
+        '''Set the mean and value for this estimate.'''
+        self._mean = value
+        self.value = value
 
-    def __iadd__(self, delta):
-        '''Add the given change to our current mean and value.'''
-        self._mean += delta
-        self.value += delta
-        return self
+    def inc(self, delta):
+        '''Add the given delta from our current mean and value.'''
+        self.set(self.value + delta)
 
 
 class Module:
@@ -183,7 +182,7 @@ class Module:
         return self._control(dt)
 
     def dead_reckon(self, dt, pedal, steer):
-        '''Update state estimates based on control signals.
+        '''Update state estimates based on control signals and current velocity.
 
         This method basically updates the means of any relevant state estimates,
         based on the control signals that the driving agent is using to navigate
@@ -203,27 +202,45 @@ class Follow(Module):
 
     def _setup(self, threshold, noise):
         '''Create PID controllers for distance and angle.'''
+        self._obs_speed = 0
+        self._obs_angle = 0
+
         self._pedal = pid_controller(kp=1, kd=2)
         self._steer = pid_controller(kp=1, ki=0.1)
-        yield 'distance', Estimator(threshold, noise)
-        yield 'angle', Estimator(threshold, noise)
+        yield 'distance', Estimator(1e-1, threshold, noise)
+        yield 'angle', Estimator(1e-3, threshold, noise)
 
     def _observe(self, agent, leader):
         '''Observe the leader to update distance and angle estimates.'''
+        self._obs_speed = agent.speed
+        self._obs_angle = agent.angle
+
         err = leader.target - agent.position
         yield 'distance', numpy.linalg.norm(err)
-        yield 'angle', relative_angle(leader.position, agent.position, agent.angle)
+        yield 'angle', relative_angle(leader.target, agent.position, agent.angle)
 
     def _control(self, dt):
         '''Issue PID control signals for distance and angle.'''
         return self._pedal(self.est_distance), self._steer(self.est_angle)
 
     def dead_reckon(self, dt, pedal, steer):
-        '''Incorporate pedal and steering changes into state estimates.'''
-        self.estimators['distance'] -= dt * numpy.clip(
-            pedal, -cars.MAX_PEDAL, cars.MAX_PEDAL)
-        self.estimators['angle'] -= dt * numpy.clip(
-            steer, -cars.MAX_STEER, cars.MAX_STEER)
+        '''Correct state estimates based on current speed and controls.'''
+        self._obs_speed += dt * pedal
+        self._obs_angle += dt * steer
+
+        def unit(a):
+            return numpy.array([numpy.cos(a), numpy.sin(a)])
+
+        oa = self._obs_angle
+
+        a = self.estimators['angle'].value
+        r = self.estimators['distance'].value * unit(a + oa)
+
+        x, y = r - dt * self._obs_speed * unit(oa)
+
+        self.estimators['distance'].set(numpy.sqrt(x * x + y * y))
+        self.estimators['angle'].set(
+            (math.atan2(y, x) - oa + TAU / 2) % TAU - TAU / 2)
 
 
 class Speed(Module):
@@ -235,7 +252,7 @@ class Speed(Module):
     def _setup(self, threshold, noise):
         '''Set up this module with the target speed.'''
         self._pedal = pid_controller(kp=1, kd=2)
-        yield 'speed', Estimator(threshold, noise)
+        yield 'speed', Estimator(1e-2, threshold, noise)
 
     def _observe(self, agent, leader):
         '''Update the module by observing the actual speed of the agent.'''
@@ -243,12 +260,11 @@ class Speed(Module):
 
     def _control(self, dt):
         '''Return the delta between target and current speeds as a control.'''
-        return self._pedal(self.est_speed - cars.TARGET_SPEED), None
+        return self._pedal(dt * (self.est_speed - cars.TARGET_SPEED)), None
 
     def dead_reckon(self, dt, pedal, steer):
         '''Incorporate the change in speed into the state estimate.'''
-        self.estimators['speed'] -= dt * numpy.clip(
-            pedal, -cars.MAX_PEDAL, cars.MAX_PEDAL)
+        self.estimators['speed'].inc(-dt * pedal)
 
 
 class Lane(Module):
@@ -261,7 +277,7 @@ class Lane(Module):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=1, ki=0.1)
-        yield 'angle', Estimator(threshold, noise)
+        yield 'angle', Estimator(1e-3, threshold, noise)
 
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
@@ -276,5 +292,4 @@ class Lane(Module):
 
     def dead_reckon(self, dt, pedal, steer):
         '''Update the angle to a lane using the current steering command.'''
-        self.estimators['angle'] -= dt * numpy.clip(
-            steer, -cars.MAX_STEER, cars.MAX_STEER)
+        self.estimators['angle'].inc(-dt * steer)
