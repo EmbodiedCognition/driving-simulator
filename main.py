@@ -11,21 +11,21 @@ import modules
 FLAGS = optparse.OptionParser('Usage: main.py [options] [lane-files]')
 FLAGS.add_option('-g', '--gl', action='store_true',
                  help='run the simulator with the OpenGL visualization')
-FLAGS.add_option('-i', '--iterations', type=int, metavar='I',
-                 help='run the simulation for I total control iterations')
+FLAGS.add_option('-i', '--iterations', type=int, metavar='K',
+                 help='run the simulation for K control iterations')
 FLAGS.add_option('-r', '--control-rate', type=float, default=20., metavar='N',
-                 help='run the simulation at N control frames per second')
-FLAGS.add_option('-R', '--fixation-rate', type=int, metavar='M',
-                 help='allow a fixation every M frames ; defaults to N / 3')
+                 help='run the simulation at N Hz')
+FLAGS.add_option('-R', '--fixation-rate', type=int, default=3, metavar='M',
+                 help='schedule fixations at M Hz')
 
 g = optparse.OptionGroup(FLAGS, 'Modules')
 g.add_option('-f', '--follow-threshold', type=float, default=2, metavar='S',
              help='set the threshold variance for the follow module to S')
-g.add_option('-F', '--follow-noise', type=float, default=1.01, metavar='R',
+g.add_option('-F', '--follow-noise', type=float, default=1.1, metavar='R',
              help='set the noise for the follow module to R')
 g.add_option('-l', '--lane-threshold', type=float, default=4, metavar='S',
              help='set the threshold variance for the lane module to S')
-g.add_option('-L', '--lane-noise', type=float, default=1.01, metavar='R',
+g.add_option('-L', '--lane-noise', type=float, default=1.05, metavar='R',
              help='set the noise for the lane module to R')
 g.add_option('-s', '--speed-threshold', type=float, default=3, metavar='S',
              help='set the threshold variance for the speed module to S')
@@ -47,7 +47,7 @@ class Simulator:
 
         self.frame = 0
         self.dt = 1. / opts.control_rate
-        self.look_interval = opts.fixation_rate or int(opts.control_rate / 3)
+        self.look_interval = int(opts.control_rate / opts.fixation_rate)
 
         # either read in track data from file, or make curvy circular test tracks.
         tracks = []
@@ -73,7 +73,7 @@ class Simulator:
         self.reset()
 
         for m in self.modules:
-            m.update(self.agent, self.leader)
+            m.observe(self.agent, self.leader)
 
     def reset(self):
         '''Reset the state of the simulation.'''
@@ -91,7 +91,7 @@ class Simulator:
         self.agent.move(self.dt)
         self.leader.move(self.dt)
         if not self.frame % self.look_interval:
-            self.agent.update(self.leader)
+            self.agent.observe(self.leader)
             print self.report()
 
     def report(self):
