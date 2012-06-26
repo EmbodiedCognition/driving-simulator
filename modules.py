@@ -139,6 +139,7 @@ class Module:
     '''
 
     def __init__(self, *args, **kwargs):
+        self._reward_weight = kwargs.get('reward', 0)
         self.estimators = dict(self._setup(*args, **kwargs))
         self.reset()
         [e.resample() for e in self.estimators.itervalues()]
@@ -167,6 +168,11 @@ class Module:
     def salience(self):
         '''Return the max (TODO: mean ?) salience of all estimators.'''
         return max(e.salience for e in self.estimators.itervalues())
+
+    @property
+    def reward(self):
+        '''Reward is a function of the distance from a target state.'''
+        return self._reward_weight * self._reward()
 
     def reset(self):
         '''Reset all estimators.'''
@@ -227,6 +233,10 @@ class Follow(Module):
         '''Issue PID control signals for distance and angle.'''
         return self._pedal(self.est_distance), self._steer(self.est_angle)
 
+    def _reward(self):
+        '''Return the reward for this module, the distance from the target.'''
+        return self.est_distance ** 2
+
     def dead_reckon(self, dt, pedal, steer):
         '''Correct state estimates based on current speed and controls.'''
         self._obs_speed += dt * pedal
@@ -266,6 +276,10 @@ class Speed(Module):
         '''Return the delta between target and current speeds as a control.'''
         return self._pedal(dt * (self.est_speed - cars.TARGET_SPEED)), None
 
+    def _reward(self):
+        '''Return the difference from the target speed.'''
+        return (self.est_speed - cars.TARGET_SPEED) ** 2
+
     def dead_reckon(self, dt, pedal, steer):
         '''Incorporate the change in speed into the state estimate.'''
         self.estimators['speed'].inc(-dt * pedal)
@@ -283,16 +297,29 @@ class Lane(Module):
         self._steer = pid_controller(kp=1, ki=0.1)
         yield 'angle', Estimator(1e-3, threshold, noise)
 
+        # this estimator is used solely to calculate reward.
+        yield 'distance', Estimator(1e-1, threshold, noise)
+
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
         dists = ((self.lanes - agent.position) ** 2).sum(axis=-1)
         l, t = numpy.unravel_index(dists.argmin(), dists.shape)
+
+        # update our distance estimate to calculate reward.
+        yield 'distance', numpy.linalg.norm(self.lanes[l, t] - agent.position)
+
+        # update the angle to the lane based on the position of the lane at some
+        # short distance ahead.
         t = (t + 20) % dists.shape[1]
         yield 'angle', relative_angle(self.lanes[l, t], agent.position, agent.angle)
 
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
         return None, self._steer(self.est_angle)
+
+    def _reward(self):
+        '''Return the distance to the nearest lane.'''
+        return self.est_distance ** 2
 
     def dead_reckon(self, dt, pedal, steer):
         '''Update the angle to a lane using the current steering command.'''
