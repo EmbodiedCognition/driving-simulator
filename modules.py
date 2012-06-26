@@ -33,12 +33,16 @@ def pid_controller(kp=0., ki=0., kd=0., history=2):
     return control
 
 
+def normalize_angle(theta):
+    '''Convert an angle from [-2pi, 2pi] to one in [-pi, pi].'''
+    return (theta + TAU / 2) % TAU - TAU / 2
+
+
 def relative_angle(target, source, heading):
     '''Compute the relative angle from source to target, a value in [-PI, PI].
     '''
     dx, dy = target - source
-    theta = math.atan2(dy, dx) - heading
-    return (theta + TAU / 2) % TAU - TAU / 2
+    return normalize_angle(math.atan2(dy, dx) - heading)
 
 
 class Estimator:
@@ -240,7 +244,7 @@ class Follow(Module):
 
         self.estimators['distance'].set(numpy.sqrt(x * x + y * y))
         self.estimators['angle'].set(
-            (math.atan2(y, x) - oa + TAU / 2) % TAU - TAU / 2)
+            normalize_angle(math.atan2(y, x) - oa))
 
 
 class Speed(Module):
