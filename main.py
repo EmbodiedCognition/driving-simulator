@@ -79,7 +79,7 @@ class Simulator:
         return '%s %s %s' % (
             numpy.linalg.norm(self.leader.target - self.agent.position),
             self.agent.speed - self.opts.target_speed,
-            ' '.join(str(m.salience) for m in self.agent.modules),
+            ' '.join(str(m.variance) for m in self.agent.modules),
             )
 
 

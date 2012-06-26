@@ -7,8 +7,8 @@ TAU = 2 * numpy.pi
 TARGET_DISTANCE = 20.
 
 MAX_SPEED = 10.
-MAX_STEER = TAU / 200.
-MAX_PEDAL = 1.
+MAX_STEER = TAU / 20.
+MAX_PEDAL = 0.5
 
 
 class Car(object):
@@ -125,25 +125,27 @@ class Modular(Car):
         speed, angle = 0, 0
         for m in self.modules:
             s, a = m.control(dt)
-            speed += s / m.variance
-            angle += a / m.variance
+            if s is not None:
+                speed += s / m.variance
+            if a is not None:
+                angle += a / m.variance
         for m in self.modules:
-            m.dead_reckon(speed, angle)
+            m.dead_reckon(dt, speed, angle)
         return speed, angle
 
     def draw(self, gfx, *color):
         '''Draw this car into the current OpenGL context.'''
-        s, f, l = self.modules
+        speed, follow, lane = self.modules
 
         gfx.draw_cone((0.8, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
-                      self.position, self.velocity, s.est_speed)
+                      self.position, self.velocity, speed.est_speed)
 
-        d, a = f.est_distance, f.est_angle
-        a += self.angle
+        d = follow.est_distance
+        a = follow.est_angle + self.angle
         gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
                         self.position + d * numpy.array([numpy.cos(a), numpy.sin(a)]))
 
-        a = l.est_angle + self.angle
+        a = lane.est_angle + self.angle
         gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
                         self.position + 10 * numpy.array([numpy.cos(a), numpy.sin(a)]))
 

@@ -5,12 +5,14 @@ import math
 import numpy
 import numpy.random as rng
 
+import cars
+
 TAU = 2 * numpy.pi
 
 
 def pid_controller(kp=0., ki=0., kd=0., history=2):
     memory = collections.deque([0] * history, maxlen=max(2, history))
-    def control(error, dt):
+    def control(error, dt=1):
         memory.append(error)
         errors = numpy.array(memory)
         integral = (errors * dt).sum()
@@ -19,9 +21,9 @@ def pid_controller(kp=0., ki=0., kd=0., history=2):
     return control
 
 
-def relative_angle(point, agent):
-    x, y = point - agent.position
-    theta = math.atan2(y, x) - agent.angle
+def relative_angle(target, position, angle):
+    dx, dy = target - position
+    theta = math.atan2(dy, dx) - angle
     return (theta + TAU / 2) % TAU - TAU / 2
 
 
@@ -32,12 +34,10 @@ class Estimator:
     whenever the system does not allocate a look, estimates grow in uncertainty.
 
     Estimates are centered around some mean value, which can be updated (using
-    the += and -= operators) using the control signals (aka dead-reckoning). The
-    variance in an estimate grows over time, unless a look is allocated to the
-    module that owns the esimator.
+    the += and -= operators) using the control signals (aka dead-reckoning).
     '''
 
-    def __init__(self, threshold, scale=0.001):
+    def __init__(self, threshold, scale=0.001, noise=1.01):
         '''Initialize this estimator.
 
         threshold: Indicates the maximum tolerated variance in the estimate
@@ -45,9 +45,12 @@ class Estimator:
 
         scale: Indicates how much to scale the variance for the estimate.
           Usually around 1e-3.
+
+        noise: The exponential time constant for uncertainty growth.
         '''
-        self._scale = scale
         self._threshold = threshold
+        self._scale = scale
+        self._noise = noise
 
         self._mean = 0
         self._variance = 1
@@ -62,8 +65,12 @@ class Estimator:
 
     @property
     def salience(self):
-        '''Salience is the exponential above-threshold variance.'''
-        return max(0, self._variance - self._threshold)
+        '''Salience is exp(sigma^2 - threshold).
+
+        This value is small for variance below the threshold, and extremely
+        large for variances exceeding the threshold.
+        '''
+        return numpy.exp(self._variance - self._threshold)
 
     def resample(self):
         '''Store a new sample, to be used within a time slice.'''
@@ -73,9 +80,9 @@ class Estimator:
         '''Draw a sample from our state value distribution.'''
         return self._mean + self._scale * rng.normal(0, self._variance)
 
-    def decay(self, dt):
-        '''Increase the variance by the amount of time that's passed.'''
-        self._variance *= 1 + dt
+    def decay(self):
+        '''Increase the variance by the noise in this system.'''
+        self._variance *= self._noise
 
     def reset(self, mean=0):
         '''Reset the variance and the mean to standard values.'''
@@ -136,11 +143,11 @@ class Module:
 
     def control(self, dt):
         for name, est in self.estimators.iteritems():
-            est.decay(dt)
+            est.decay()
             est.resample()
         return self._control(dt)
 
-    def dead_reckon(self, speed, angle):
+    def dead_reckon(self, dt, speed, angle):
         pass
 
 
@@ -157,18 +164,16 @@ class Follow(Module):
     def _update(self, agent, leader):
         '''Observe the leader to update distance and angle estimates.'''
         err = leader.target - agent.position
-        distance = numpy.linalg.norm(err)
-        if numpy.dot(err, agent.velocity) < 0:
-            distance *= -1
-        yield 'distance', distance
-        yield 'angle', relative_angle(leader.position, agent)
+        yield 'distance', numpy.linalg.norm(err)
+        yield 'angle', relative_angle(leader.position, agent.position, agent.angle)
 
     def _control(self, dt):
         '''Issue PID control signals for distance and angle.'''
-        return self._pedal(self.est_distance, dt), self._steer(self.est_angle, dt)
+        return self._pedal(self.est_distance), self._steer(self.est_angle)
 
-    def dead_reckon(self, speed, angle):
-        self.estimators['angle'] -= angle
+    def dead_reckon(self, dt, speed, angle):
+        self.estimators['angle'] -= dt * numpy.clip(
+            angle, -cars.MAX_STEER, cars.MAX_STEER)
 
 
 class Speed(Module):
@@ -186,10 +191,11 @@ class Speed(Module):
 
     def _control(self, dt):
         '''Return the delta between target and current speeds as a control.'''
-        return self._pedal(self.est_speed - self.target_speed, dt), 0
+        return self._pedal(self.est_speed - self.target_speed), None
 
-    def dead_reckon(self, speed, angle):
-        self.estimators['speed'] -= speed
+    def dead_reckon(self, dt, speed, angle):
+        self.estimators['speed'] -= dt * numpy.clip(
+            speed, -cars.MAX_PEDAL, cars.MAX_PEDAL)
 
 
 class Lane(Module):
@@ -206,11 +212,12 @@ class Lane(Module):
         dists = ((self.lanes - agent.position) ** 2).sum(axis=-1)
         l, t = numpy.unravel_index(dists.argmin(), dists.shape)
         t = (t + 20) % dists.shape[1]
-        yield 'angle', relative_angle(self.lanes[l, t], agent)
+        yield 'angle', relative_angle(self.lanes[l, t], agent.position, agent.angle)
 
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
-        return 0, self._steer(self.est_angle, dt)
+        return None, self._steer(self.est_angle)
 
-    def dead_reckon(self, speed, angle):
-        self.estimators['angle'] -= angle
+    def dead_reckon(self, dt, speed, angle):
+        self.estimators['angle'] -= dt * numpy.clip(
+            angle, -cars.MAX_STEER, cars.MAX_STEER)
