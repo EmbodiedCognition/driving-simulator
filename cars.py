@@ -13,7 +13,7 @@ import numpy.random as rng
 TAU = 2 * numpy.pi
 
 TARGET_SPEED = 4.
-TARGET_DISTANCE = 20.
+TARGET_DISTANCE = 30
 
 MAX_SPEED = 10.
 MAX_STEER = TAU / 20.
@@ -54,11 +54,9 @@ class Car(object):
 
     def move(self, dt):
         '''Move this car through a given slice of time.'''
-        ds, da = self.control(dt)
-        ds = numpy.clip(ds, -MAX_PEDAL, MAX_PEDAL)
-        da = numpy.clip(da, -MAX_STEER, MAX_STEER)
-        self.speed = numpy.clip(self.speed + dt * ds, 0, MAX_SPEED)
-        self.angle += dt * da
+        pedal, steer = self.control(dt)
+        self.speed = numpy.clip(self.speed + dt * pedal, 0, MAX_SPEED)
+        self.angle += dt * steer
         self.position += dt * self.velocity
 
     def control(self, dt):
@@ -83,18 +81,19 @@ class Track(Car):
 
     @property
     def target(self):
-        i = (self.index - 50) % len(self.track)
+        i = (self.index - TARGET_DISTANCE) % len(self.track)
         return self.track[i]
 
     def reset(self, leader=None):
         '''Move this car to the beginning of the lane.'''
-        self.index = 50
-        self.move()
+        self.index = TARGET_DISTANCE
+        self.position = self.track[self.index].copy()
+        self.move(1)
 
     def move(self, dt):
         self.index = (self.index + 1) % len(self.track)
         dx, dy = self.track[self.index] - self.position
-        self.speed = math.sqrt(dx * dx + dy * dy)
+        self.speed = math.sqrt(dx * dx + dy * dy) / dt
         self.angle = math.atan2(dy, dx)
         self.position = self.track[self.index].copy()
 
@@ -120,8 +119,13 @@ class Modular(Car):
         for m in self.modules:
             m.reset()
 
-    def update(self, leader):
-        '''Pass the position of the leader to one module for update.'''
+    def observe(self, leader):
+        '''Pass the position of the leader to one module for update.
+
+        This is where perceptual arbitration takes place !!
+        '''
+        # currently, we choose a module based on the degree to which its
+        # variance exceeds its threshold.
         w = numpy.array([m.salience for m in self.modules])
         if w.sum() == 0:
             w = numpy.ones_like(w)
@@ -131,16 +135,18 @@ class Modular(Car):
 
     def control(self, dt):
         '''Calculate a speed/angle control signal for a time slice dt.'''
-        speed, angle = 0, 0
+        pedal = steer = 0
         for m in self.modules:
-            s, a = m.control(dt)
+            p, s = m.control(dt)
+            if p is not None:
+                pedal += p / numpy.sqrt(m.variance)
             if s is not None:
-                speed += s / m.variance
-            if a is not None:
-                angle += a / m.variance
+                steer += s / numpy.sqrt(m.variance)
+        pedal = numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL)
+        steer = numpy.clip(steer, -MAX_STEER, MAX_STEER)
         for m in self.modules:
-            m.dead_reckon(dt, speed, angle)
-        return speed, angle
+            m.dead_reckon(dt, pedal, steer)
+        return pedal, steer
 
     def draw(self, gfx, *color):
         '''Draw this car into the graphical visualization.'''
@@ -153,12 +159,14 @@ class Modular(Car):
         d = follow.est_distance
         a = follow.est_angle + self.angle
         gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
-                        self.position + d * numpy.array([numpy.cos(a), numpy.sin(a)]))
+                        self.position + d * numpy.array([numpy.cos(a), numpy.sin(a)]),
+                        numpy.sqrt(follow.variance))
 
         # draw a green sphere near the driving agent to represent the estimated
         # angle to the nearest lane.
         a = lane.est_angle + self.angle
         gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
-                        self.position + 10 * numpy.array([numpy.cos(a), numpy.sin(a)]))
+                        self.position + 10 * numpy.array([numpy.cos(a), numpy.sin(a)]),
+                        numpy.sqrt(lane.variance))
 
         super(Modular, self).draw(gfx, *color)
