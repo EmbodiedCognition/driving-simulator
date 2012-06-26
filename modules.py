@@ -210,7 +210,7 @@ class Follow(Module):
     and the relative angle to the leader car.
     '''
 
-    def _setup(self, threshold, noise):
+    def _setup(self, threshold, noise, **kwargs):
         '''Create PID controllers for distance and angle.'''
         self._obs_speed = 0
         self._obs_angle = 0
@@ -263,7 +263,7 @@ class Speed(Module):
     The relevant state variable for this task is the driving agent's speed.
     '''
 
-    def _setup(self, threshold, noise):
+    def _setup(self, threshold, noise, **kwargs):
         '''Set up this module with the target speed.'''
         self._pedal = pid_controller(kp=1, kd=2)
         yield 'speed', Estimator(1e-2, threshold, noise)
@@ -291,7 +291,7 @@ class Lane(Module):
     The relevant state variable for this task is the angle to the nearest lane.
     '''
 
-    def _setup(self, lanes, threshold, noise):
+    def _setup(self, lanes, threshold, noise, **kwargs):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=1, ki=0.1)
