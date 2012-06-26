@@ -2,6 +2,7 @@ import glumpy
 import math
 import OpenGL.GL as gl
 import OpenGL.GLU as glu
+import sys
 
 TAU = 2 * math.pi
 
@@ -44,16 +45,9 @@ def draw_sphere(color, pos):
     gl.glPopMatrix()
 
 
-def switch_alphas():
-    global ESTIMATE_ALPHA, REALITY_ALPHA
-    ESTIMATE_ALPHA, REALITY_ALPHA = REALITY_ALPHA, ESTIMATE_ALPHA
+elapsed = 0
 
-
-def main(opts, tracks, leader, agent):
-    DT = 1. / opts.sample_rate
-    elapsed = 0
-    frame = 0
-
+def main(simulator):
     fig = glumpy.figure()
     world = fig.add_figure()
 
@@ -89,52 +83,36 @@ def main(opts, tracks, leader, agent):
         # draw lanes.
         gl.glLineWidth(2)
         gl.glColor(0, 0, 0)
-        for track in tracks:
+        for track in simulator.tracks:
             gl.glBegin(gl.GL_LINE_STRIP)
             for a, b in track:
                 gl.glVertex(a, b, 1)
             gl.glEnd()
 
         # draw cars.
-        agent.draw(gfx, 1, 1, 0, gfx.REALITY_ALPHA)
-        leader.draw(gfx, 1, 0, 0, gfx.REALITY_ALPHA)
+        simulator.agent.draw(sys.modules[__name__], 1, 1, 0, REALITY_ALPHA)
+        simulator.leader.draw(sys.modules[__name__], 1, 0, 0, REALITY_ALPHA)
 
         gl.glPopMatrix()
 
     @fig.event
     def on_idle(dt):
-        global elapsed, frame
-
-        #elapsed += DT  # -- run the simulation at top speed
-        elapsed += dt  # -- run the simulation at real-time
-
-        while elapsed > DT:
-            elapsed -= DT
-            frame += 1
-
-            agent.move(DT)
-            leader.move(DT)
-
-            if not frame % int(opts.sample_rate / 3):
-                agent.update(leader)
-
-            print numpy.linalg.norm(leader.target - agent.position),
-            print agent.speed - opts.target_speed,
-            for m in agent.modules:
-                print m.salience,
-            print
-
-        fig.redraw()
+        global elapsed
+        elapsed += dt
+        while elapsed > simulator.dt:
+            elapsed -= simulator.dt
+            simulator.step()
+            fig.redraw()
 
     @fig.event
     def on_key_press(key, modifiers):
         if key == glumpy.window.key.ESCAPE:
             sys.exit()
         elif key == glumpy.window.key.SPACE:
-            gfx.switch_alphas()
+            global ESTIMATE_ALPHA, REALITY_ALPHA
+            ESTIMATE_ALPHA, REALITY_ALPHA = REALITY_ALPHA, ESTIMATE_ALPHA
         else:
-            leader.reset()
-            agent.reset(leader)
+            simulator.reset()
         fig.redraw()
 
     glumpy.show()
