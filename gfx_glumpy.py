@@ -32,7 +32,7 @@ def draw_cone(color, pos, vel, speed):
     gl.glPopMatrix()
 
 
-def draw_sphere(color, pos):
+def draw_sphere(color, pos, radius=2):
     gl.glColor(*color)
 
     gl.glPushMatrix()
@@ -41,7 +41,7 @@ def draw_sphere(color, pos):
     gl.glTranslate(x, y, 3)
 
     q = glu.gluNewQuadric()
-    glu.gluSphere(q, 2, 10, 10)
+    glu.gluSphere(q, radius, 10, 10)
     glu.gluDeleteQuadric(q)
 
     gl.glPopMatrix()
