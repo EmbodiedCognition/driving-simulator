@@ -12,6 +12,7 @@ import numpy.random as rng
 
 TAU = 2 * numpy.pi
 
+TARGET_SPEED = 4.
 TARGET_DISTANCE = 20.
 
 MAX_SPEED = 10.
@@ -126,7 +127,7 @@ class Modular(Car):
             w = numpy.ones_like(w)
         cdf = w.cumsum()
         m = self.modules[cdf.searchsorted(rng.uniform(0, cdf[-1]))]
-        m.update(self, leader)
+        m.observe(self, leader)
 
     def control(self, dt):
         '''Calculate a speed/angle control signal for a time slice dt.'''

@@ -127,8 +127,8 @@ class Module:
 
     This class also contains some higher-level methods for providing control
     signals to a driving agent (the control() and _control() methods), and for
-    incorporating state updates based on observations of the world (the update()
-    and _update() methods).
+    incorporating state updates based on observations of the world (the
+    observe() and _observe() methods).
 
     In the driving simulator, there are really only ever three types of state
     variable estimates -- distance, speed, and angle. These are used in some
@@ -169,9 +169,9 @@ class Module:
         '''Reset all estimators.'''
         [e.reset() for e in self.estimators.itervalues()]
 
-    def update(self, agent, leader):
+    def observe(self, agent, leader):
         '''Update this module given the true states of the agent and leader.'''
-        values = dict(self._update(agent, leader))
+        values = dict(self._observe(agent, leader))
         for name, est in self.estimators.iteritems():
             est.reset(values.get(name, 0))
 
@@ -201,14 +201,14 @@ class Follow(Module):
     and the relative angle to the leader car.
     '''
 
-    def _setup(self, threshold):
+    def _setup(self, threshold, noise):
         '''Create PID controllers for distance and angle.'''
         self._pedal = pid_controller(kp=1, kd=2)
         self._steer = pid_controller(kp=1, ki=0.1)
-        yield 'distance', Estimator(threshold)
-        yield 'angle', Estimator(threshold)
+        yield 'distance', Estimator(threshold, noise)
+        yield 'angle', Estimator(threshold, noise)
 
-    def _update(self, agent, leader):
+    def _observe(self, agent, leader):
         '''Observe the leader to update distance and angle estimates.'''
         err = leader.target - agent.position
         yield 'distance', numpy.linalg.norm(err)
@@ -232,19 +232,18 @@ class Speed(Module):
     The relevant state variable for this task is the driving agent's speed.
     '''
 
-    def _setup(self, target_speed, threshold):
+    def _setup(self, threshold, noise):
         '''Set up this module with the target speed.'''
-        self.target_speed = target_speed
         self._pedal = pid_controller(kp=1, kd=2)
-        yield 'speed', Estimator(threshold)
+        yield 'speed', Estimator(threshold, noise)
 
-    def _update(self, agent, leader):
+    def _observe(self, agent, leader):
         '''Update the module by observing the actual speed of the agent.'''
         yield 'speed', agent.speed
 
     def _control(self, dt):
         '''Return the delta between target and current speeds as a control.'''
-        return self._pedal(self.est_speed - self.target_speed), None
+        return self._pedal(self.est_speed - cars.TARGET_SPEED), None
 
     def dead_reckon(self, dt, pedal, steer):
         '''Incorporate the change in speed into the state estimate.'''
@@ -258,13 +257,13 @@ class Lane(Module):
     The relevant state variable for this task is the angle to the nearest lane.
     '''
 
-    def _setup(self, lanes, threshold):
+    def _setup(self, lanes, threshold, noise):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=1, ki=0.1)
-        yield 'angle', Estimator(threshold)
+        yield 'angle', Estimator(threshold, noise)
 
-    def _update(self, agent, leader):
+    def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
         dists = ((self.lanes - agent.position) ** 2).sum(axis=-1)
         l, t = numpy.unravel_index(dists.argmin(), dists.shape)
