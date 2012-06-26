@@ -106,7 +106,8 @@ class Modular(Car):
     tend to keep this car going in a reasonably lifelike manner.
     '''
 
-    def __init__(self, modules):
+    def __init__(self, modules, sprague_ballard=False):
+        self.sprague_ballard = sprague_ballard
         self.modules = modules
         self.reset()
 
@@ -124,14 +125,22 @@ class Modular(Car):
 
         This is where perceptual arbitration takes place !!
         '''
-        # currently, we choose a module based on the degree to which its
-        # variance exceeds its threshold.
+        select = self.select_by_salience
+        if self.sprague_ballard:
+            select = self.select_sprague_ballard
+        select().observe(self, leader)
+
+    def select_by_salience(self):
+        '''We sample a module for update proportional to its salience.'''
         w = numpy.array([m.salience for m in self.modules])
         if w.sum() == 0:
             w = numpy.ones_like(w)
         cdf = w.cumsum()
-        m = self.modules[cdf.searchsorted(rng.uniform(0, cdf[-1]))]
-        m.observe(self, leader)
+        return self.modules[cdf.searchsorted(rng.uniform(0, cdf[-1]))]
+
+    def select_sprague_ballard(self):
+        '''We select a module for update based on Sprague & Ballard.'''
+        raise NotImplementedError
 
     def control(self, dt):
         '''Calculate a speed/angle control signal for a time slice dt.'''
