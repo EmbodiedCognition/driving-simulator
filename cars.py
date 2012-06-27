@@ -13,7 +13,7 @@ import numpy.random as rng
 TAU = 2 * numpy.pi
 
 TARGET_SPEED = 4.
-TARGET_DISTANCE = 30
+TARGET_DISTANCE = 50
 
 MAX_SPEED = 10.
 MAX_STEER = TAU / 20.
@@ -57,6 +57,10 @@ class Car(object):
         pedal, steer = self.control(dt)
         self.speed = numpy.clip(self.speed + dt * pedal, 0, MAX_SPEED)
         self.angle += dt * steer
+        while self.angle < -TAU / 2:
+            self.angle += TAU
+        while self.angle > TAU / 2:
+            self.angle -= TAU
         self.position += dt * self.velocity
 
     def control(self, dt):
@@ -121,10 +125,7 @@ class Modular(Car):
             m.reset()
 
     def observe(self, leader):
-        '''Pass the position of the leader to one module for update.
-
-        This is where perceptual arbitration takes place !!
-        '''
+        '''Pass the position of the leader to one module for update.'''
         select = self.select_by_salience
         if self.sprague_ballard:
             select = self.select_sprague_ballard
@@ -151,11 +152,8 @@ class Modular(Car):
                 pedal += p / numpy.sqrt(m.variance)
             if s is not None:
                 steer += s / numpy.sqrt(m.variance)
-        pedal = numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL)
-        steer = numpy.clip(steer, -MAX_STEER, MAX_STEER)
-        for m in self.modules:
-            m.dead_reckon(dt, pedal, steer)
-        return pedal, steer
+        return (numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL),
+                numpy.clip(steer, -MAX_STEER, MAX_STEER))
 
     def draw(self, gfx, *color):
         '''Draw this car into the graphical visualization.'''
@@ -164,18 +162,20 @@ class Modular(Car):
         gfx.draw_cone((0.8, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
                       self.position, self.velocity, speed.est_speed)
 
+        def unit(r, a):
+            a += self.angle
+            return self.position + r * numpy.array([numpy.cos(a), numpy.sin(a)])
+
         # draw a red sphere at the estimate of the leader car's sweet spot.
-        d = follow.est_distance
-        a = follow.est_angle + self.angle
+        d = [-1, 1][follow.ahead] * follow.est_distance
         gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
-                        self.position + d * numpy.array([numpy.cos(a), numpy.sin(a)]),
+                        unit(d, follow.est_angle),
                         numpy.sqrt(follow.variance))
 
         # draw a green sphere near the driving agent to represent the estimated
         # angle to the nearest lane.
-        a = lane.est_angle + self.angle
         gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
-                        self.position + 10 * numpy.array([numpy.cos(a), numpy.sin(a)]),
+                        unit(15, lane.est_angle),
                         numpy.sqrt(lane.variance))
 
         super(Modular, self).draw(gfx, *color)

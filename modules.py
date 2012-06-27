@@ -139,7 +139,7 @@ class Module:
     '''
 
     def __init__(self, *args, **kwargs):
-        self._reward_weight = kwargs.get('reward', 0)
+        self._threshold = kwargs.get('threshold', 0)
         self.estimators = dict(self._setup(*args, **kwargs))
         self.reset()
         [e.resample() for e in self.estimators.itervalues()]
@@ -172,7 +172,7 @@ class Module:
     @property
     def reward(self):
         '''Reward is a function of the distance from a target state.'''
-        return self._reward_weight * self._reward()
+        return self._reward() / self._threshold
 
     def reset(self):
         '''Reset all estimators.'''
@@ -191,17 +191,6 @@ class Module:
             est.resample()
         return self._control(dt)
 
-    def dead_reckon(self, dt, pedal, steer):
-        '''Update state estimates based on control signals and current velocity.
-
-        This method basically updates the means of any relevant state estimates,
-        based on the control signals that the driving agent is using to navigate
-        around the world. It's akin to dead-reckoning in navigation, where the
-        pilot uses estimates of current velocity and time to keep track of
-        distance traveled.
-        '''
-        pass
-
 
 class Follow(Module):
     '''This module attempts to follow a leader car.
@@ -217,8 +206,11 @@ class Follow(Module):
 
         self._pedal = pid_controller(kp=1, kd=2)
         self._steer = pid_controller(kp=1, ki=0.1)
+
         yield 'distance', Estimator(1e-1, threshold, noise)
         yield 'angle', Estimator(1e-3, threshold, noise)
+
+        self.ahead = True
 
     def _observe(self, agent, leader):
         '''Observe the leader to update distance and angle estimates.'''
@@ -226,8 +218,9 @@ class Follow(Module):
         self._obs_angle = agent.angle
 
         err = leader.target - agent.position
-        yield 'distance', numpy.linalg.norm(err)
-        yield 'angle', relative_angle(leader.target, agent.position, agent.angle)
+        self.ahead = numpy.dot(err, agent.velocity) > 0
+        yield 'distance', numpy.linalg.norm(err) * [-1, 1][self.ahead]
+        yield 'angle', relative_angle(leader.position, agent.position, agent.angle)
 
     def _control(self, dt):
         '''Issue PID control signals for distance and angle.'''
@@ -236,25 +229,6 @@ class Follow(Module):
     def _reward(self):
         '''Return the reward for this module, the distance from the target.'''
         return self.est_distance ** 2
-
-    def dead_reckon(self, dt, pedal, steer):
-        '''Correct state estimates based on current speed and controls.'''
-        self._obs_speed += dt * pedal
-        self._obs_angle += dt * steer
-
-        def unit(a):
-            return numpy.array([numpy.cos(a), numpy.sin(a)])
-
-        oa = self._obs_angle
-
-        a = self.estimators['angle'].value
-        r = self.estimators['distance'].value * unit(a + oa)
-
-        x, y = r - dt * self._obs_speed * unit(oa)
-
-        self.estimators['distance'].set(numpy.sqrt(x * x + y * y))
-        self.estimators['angle'].set(
-            normalize_angle(math.atan2(y, x) - oa))
 
 
 class Speed(Module):
@@ -274,15 +248,11 @@ class Speed(Module):
 
     def _control(self, dt):
         '''Return the delta between target and current speeds as a control.'''
-        return self._pedal(dt * (self.est_speed - cars.TARGET_SPEED)), None
+        return self._pedal((self.est_speed - cars.TARGET_SPEED) * dt), None
 
     def _reward(self):
         '''Return the difference from the target speed.'''
         return (self.est_speed - cars.TARGET_SPEED) ** 2
-
-    def dead_reckon(self, dt, pedal, steer):
-        '''Incorporate the change in speed into the state estimate.'''
-        self.estimators['speed'].inc(-dt * pedal)
 
 
 class Lane(Module):
@@ -320,7 +290,3 @@ class Lane(Module):
     def _reward(self):
         '''Return the distance to the nearest lane.'''
         return self.est_distance ** 2
-
-    def dead_reckon(self, dt, pedal, steer):
-        '''Update the angle to a lane using the current steering command.'''
-        self.estimators['angle'].inc(-dt * steer)
