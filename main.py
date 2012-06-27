@@ -23,20 +23,14 @@ g.add_option('-f', '--follow-threshold', type=float, default=2, metavar='S',
              help='set the threshold variance for the follow module to S')
 g.add_option('-F', '--follow-noise', type=float, default=1.1, metavar='R',
              help='set the noise for the follow module to R')
-g.add_option('', '--follow-reward', type=float, default=0, metavar='R',
-             help='set the reward for the follow module to R')
 g.add_option('-l', '--lane-threshold', type=float, default=4, metavar='S',
              help='set the threshold variance for the lane module to S')
 g.add_option('-L', '--lane-noise', type=float, default=1.05, metavar='R',
              help='set the noise for the lane module to R')
-g.add_option('', '--lane-reward', type=float, default=0, metavar='R',
-             help='set the reward for the lane module to R')
 g.add_option('-s', '--speed-threshold', type=float, default=3, metavar='S',
              help='set the threshold variance for the speed module to S')
 g.add_option('-S', '--speed-noise', type=float, default=1.01, metavar='R',
              help='set the noise for the speed module to R')
-g.add_option('', '--speed-reward', type=float, default=0, metavar='R',
-             help='set the reward for the speed module to R')
 FLAGS.add_option_group(g)
 
 
@@ -68,9 +62,9 @@ class Simulator:
 
         # create modules for the follower car.
         self.modules = [
-            modules.Speed(threshold=opts.speed_threshold, noise=opts.speed_noise, reward=opts.speed_reward),
-            modules.Follow(threshold=opts.follow_threshold, noise=opts.follow_noise, reward=opts.follow_reward),
-            modules.Lane(tracks, threshold=opts.lane_threshold, noise=opts.lane_noise, reward=opts.lane_reward),
+            modules.Speed(threshold=opts.speed_threshold, noise=opts.speed_noise),
+            modules.Follow(threshold=opts.follow_threshold, noise=opts.follow_noise),
+            modules.Lane(tracks, threshold=opts.lane_threshold, noise=opts.lane_noise),
             ]
 
         # create the follower car, and position it behind the leader car.
