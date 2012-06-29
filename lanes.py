@@ -8,7 +8,9 @@ TAU = 2 * numpy.pi
 def read(filenames):
     '''Read data points for a lane from one or more text files.'''
     for filename in filenames:
-        yield numpy.fromfile(filename, sep=' ')[:, 1:3]
+        arr = numpy.loadtxt(filename)
+        for i in range(1, arr.shape[1], 7):
+            yield arr[:, i:i+2]
 
 
 def create(num_lanes=2,
