@@ -121,23 +121,23 @@ class Modular(Car):
         if leader is not None:
             self.position = rng.normal(leader.target, 2)
             self.angle = leader.angle
-        for m in self.modules:
-            m.reset()
 
     def observe(self, leader):
         '''Pass the position of the leader to one module for update.'''
-        select = self.select_by_salience
+        select = self.select_by_uncertainty
         if self.sprague_ballard:
             select = self.select_sprague_ballard
-        select().observe(self, leader)
+        m = select()
+        self.modules[m].observe(self, leader)
+        return m
 
-    def select_by_salience(self):
-        '''We sample a module for update proportional to its salience.'''
-        w = numpy.array([m.salience for m in self.modules])
+    def select_by_uncertainty(self):
+        '''We sample a module for update proportional to its uncertainty.'''
+        w = numpy.array([m.uncertainty for m in self.modules])
         if w.sum() == 0:
             w = numpy.ones_like(w)
         cdf = w.cumsum()
-        return self.modules[cdf.searchsorted(rng.uniform(0, cdf[-1]))]
+        return cdf.searchsorted(rng.uniform(0, cdf[-1]))
 
     def select_sprague_ballard(self):
         '''We select a module for update based on Sprague & Ballard.'''
@@ -149,9 +149,9 @@ class Modular(Car):
         for m in self.modules:
             p, s = m.control(dt)
             if p is not None:
-                pedal += p / numpy.sqrt(m.variance)
+                pedal += p / m.uncertainty
             if s is not None:
-                steer += s / numpy.sqrt(m.variance)
+                steer += s / m.uncertainty
         return (numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL),
                 numpy.clip(steer, -MAX_STEER, MAX_STEER))
 
@@ -170,12 +170,12 @@ class Modular(Car):
         d = [-1, 1][follow.ahead] * follow.est_distance
         gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
                         unit(d, follow.est_angle),
-                        numpy.sqrt(follow.variance))
+                        numpy.sqrt(follow.uncertainty))
 
         # draw a green sphere near the driving agent to represent the estimated
         # angle to the nearest lane.
         gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
                         unit(15, lane.est_angle),
-                        numpy.sqrt(lane.variance))
+                        numpy.sqrt(lane.uncertainty))
 
         super(Modular, self).draw(gfx, *color)

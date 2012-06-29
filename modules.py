@@ -51,72 +51,51 @@ class Estimator:
     Estimates are updated whenever the system allocates a look to a module ;
     whenever the system does not allocate a look, estimates grow in uncertainty.
 
-    Estimates are centered around some mean value, which can be updated (using
-    the inc() and set() methods) using the control signals (aka dead-reckoning).
+    Estimates are centered around the last-observed value, but then distorted
+    over time through error that accumulates during a random walk. This error is
+    reset whenever the true value is observed.
     '''
 
-    def __init__(self, scale, threshold, noise):
+    def __init__(self, threshold, step):
         '''Initialize this estimator.
 
-        scale: Indicates how much to scale the variance for the estimate. This
-          is here to make sure different variance values are commensurate with
-          the inherent variance that we consider acceptable for whatever units
-          this state variable is measured in.
+        threshold: Indicates the maximum tolerated error in the estimate
+          before this estimate becomes a candidate for a look.
 
-        threshold: Indicates the maximum tolerated variance in the estimate
-          before this value becomes a candidate for a look.
-
-        noise: The exponential time constant for variance growth.
+        step: The step size for a random walk in measurement error.
         '''
         self._threshold = threshold
-        self._scale = scale
-        self._noise = noise
-
-        self._mean = 0
-        self._variance = 1
-
-        self.value = None
-        self.resample()
+        self._step = step
+        self._error = 0
+        self._value = 0
 
     @property
-    def variance(self):
-        '''Variance is the uncertainty in the state distribution.'''
-        return self._variance
+    def value(self):
+        '''Get the current estimated value of this parameter.'''
+        return self._value + self._error
 
     @property
-    def salience(self):
-        '''Salience is exp(sigma^2 - threshold).
+    def error(self):
+        '''Get the current absolute error of this parameter.'''
+        return abs(self._error)
 
-        This value is small for variance below the threshold, and large for
-        variance exceeding the threshold.
+    @property
+    def uncertainty(self):
+        '''Uncertainty of a module is exp(|error| - threshold).
+
+        This value is small for error below the threshold, and large for error
+        exceeding the threshold.
         '''
-        return numpy.exp(self._variance - self._threshold)
+        return numpy.exp(self.error - self._threshold)
 
-    def resample(self):
-        '''Store a new sample, usually to be used within a time slice.'''
-        self.value = self.sample()
+    def step(self):
+        '''Potentially increase the error by taking a random step.'''
+        self._error += [1, -1][rng.uniform() > 0.5] * self._step
 
-    def sample(self):
-        '''Draw a sample from our state value distribution.'''
-        return rng.normal(self._mean, self._scale * self._variance)
-
-    def decay(self):
-        '''Increase the variance by the noise in this system.'''
-        self._variance *= self._noise
-
-    def reset(self, mean=0):
-        '''Reset the variance and the mean to standard values.'''
-        self._mean = mean
-        self._variance = 1
-
-    def set(self, value):
-        '''Set the mean and value for this estimate.'''
-        self._mean = value
-        self.value = value
-
-    def inc(self, delta):
-        '''Add the given delta from our current mean and value.'''
-        self.set(self.value + delta)
+    def observe(self, value):
+        '''Reset the estimated value and error to standard values.'''
+        self._value = value
+        self._error = 0
 
 
 class Module:
@@ -139,10 +118,7 @@ class Module:
     '''
 
     def __init__(self, *args, **kwargs):
-        self._threshold = kwargs.get('threshold', 0)
         self.estimators = dict(self._setup(*args, **kwargs))
-        self.reset()
-        [e.resample() for e in self.estimators.itervalues()]
 
     @property
     def est_distance(self):
@@ -160,35 +136,24 @@ class Module:
         return self.estimators['angle'].value
 
     @property
-    def variance(self):
-        '''Return the max (TODO: mean ?) variance of all estimators.'''
-        return max(e.variance for e in self.estimators.itervalues())
+    def uncertainty(self):
+        '''Return the uncertainty of the distance estimator.'''
+        return self.estimators['distance'].uncertainty
 
     @property
-    def salience(self):
-        '''Return the max (TODO: mean ?) salience of all estimators.'''
-        return max(e.salience for e in self.estimators.itervalues())
-
-    @property
-    def reward(self):
-        '''Reward is a function of the distance from a target state.'''
-        return self._reward() / self._threshold
-
-    def reset(self):
-        '''Reset all estimators.'''
-        [e.reset() for e in self.estimators.itervalues()]
+    def error(self):
+        '''Return the error of the distance estimator.'''
+        return self.estimators['distance'].error
 
     def observe(self, agent, leader):
         '''Update this module given the true states of the agent and leader.'''
         values = dict(self._observe(agent, leader))
         for name, est in self.estimators.iteritems():
-            est.reset(values.get(name, 0))
+            est.observe(values.get(name, 0))
 
     def control(self, dt):
         '''Provide a control signal using current state estimates.'''
-        for name, est in self.estimators.iteritems():
-            est.decay()
-            est.resample()
+        [est.step() for est in self.estimators.itervalues()]
         return self._control(dt)
 
 
@@ -199,24 +164,20 @@ class Follow(Module):
     and the relative angle to the leader car.
     '''
 
-    def _setup(self, threshold, noise, **kwargs):
+    def _setup(self, threshold, step, distance_scale=1e-1, angle_scale=1e-3):
         '''Create PID controllers for distance and angle.'''
-        self._obs_speed = 0
-        self._obs_angle = 0
-
         self._pedal = pid_controller(kp=1, kd=2)
         self._steer = pid_controller(kp=1, ki=0.1)
 
-        yield 'distance', Estimator(1e-1, threshold, noise)
-        yield 'angle', Estimator(1e-3, threshold, noise)
+        yield 'distance', Estimator(
+            distance_scale * threshold, distance_scale * step)
+        yield 'angle', Estimator(
+            angle_scale * threshold, angle_scale * step)
 
         self.ahead = True
 
     def _observe(self, agent, leader):
         '''Observe the leader to update distance and angle estimates.'''
-        self._obs_speed = agent.speed
-        self._obs_angle = agent.angle
-
         err = leader.target - agent.position
         self.ahead = numpy.dot(err, agent.velocity) > 0
         yield 'distance', numpy.linalg.norm(err) * [-1, 1][self.ahead]
@@ -226,10 +187,6 @@ class Follow(Module):
         '''Issue PID control signals for distance and angle.'''
         return self._pedal(self.est_distance), self._steer(self.est_angle)
 
-    def _reward(self):
-        '''Return the reward for this module, the distance from the target.'''
-        return self.est_distance ** 2
-
 
 class Speed(Module):
     '''This module attempts to maintain a specific target speed.
@@ -237,10 +194,21 @@ class Speed(Module):
     The relevant state variable for this task is the driving agent's speed.
     '''
 
-    def _setup(self, threshold, noise, **kwargs):
+    @property
+    def uncertainty(self):
+        '''Return the uncertainty of the speed estimator.'''
+        return self.estimators['speed'].uncertainty
+
+    @property
+    def error(self):
+        '''Return the error of the speed estimator.'''
+        return self.estimators['speed'].error
+
+    def _setup(self, threshold, step):
         '''Set up this module with the target speed.'''
         self._pedal = pid_controller(kp=1, kd=2)
-        yield 'speed', Estimator(1e-2, threshold, noise)
+
+        yield 'speed', Estimator(threshold, step)
 
     def _observe(self, agent, leader):
         '''Update the module by observing the actual speed of the agent.'''
@@ -250,10 +218,6 @@ class Speed(Module):
         '''Return the delta between target and current speeds as a control.'''
         return self._pedal((self.est_speed - cars.TARGET_SPEED) * dt), None
 
-    def _reward(self):
-        '''Return the difference from the target speed.'''
-        return (self.est_speed - cars.TARGET_SPEED) ** 2
-
 
 class Lane(Module):
     '''This module tries to keep the car in one of the available lanes.
@@ -261,21 +225,22 @@ class Lane(Module):
     The relevant state variable for this task is the angle to the nearest lane.
     '''
 
-    def _setup(self, lanes, threshold, noise, **kwargs):
+    def _setup(self, lanes, threshold, step, distance_scale=1e-1, angle_scale=1e-3):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=1, ki=0.1)
-        yield 'angle', Estimator(1e-3, threshold, noise)
 
-        # this estimator is used solely to calculate reward.
-        yield 'distance', Estimator(1e-1, threshold, noise)
+        yield 'distance', Estimator(
+            distance_scale * threshold, distance_scale * step)
+        yield 'angle', Estimator(
+            angle_scale * threshold, angle_scale * step)
 
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
         dists = ((self.lanes - agent.position) ** 2).sum(axis=-1)
         l, t = numpy.unravel_index(dists.argmin(), dists.shape)
 
-        # update our distance estimate to calculate reward.
+        # update our distance estimate.
         yield 'distance', numpy.linalg.norm(self.lanes[l, t] - agent.position)
 
         # update the angle to the lane based on the position of the lane at some
@@ -286,7 +251,3 @@ class Lane(Module):
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
         return None, self._steer(self.est_angle)
-
-    def _reward(self):
-        '''Return the distance to the nearest lane.'''
-        return self.est_distance ** 2
