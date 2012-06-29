@@ -19,18 +19,18 @@ FLAGS.add_option('-R', '--fixation-rate', type=int, default=3, metavar='M',
                  help='schedule fixations at M Hz')
 
 g = optparse.OptionGroup(FLAGS, 'Modules')
-g.add_option('-f', '--follow-threshold', type=float, default=2, metavar='S',
-             help='set the threshold variance for the follow module to S')
-g.add_option('-F', '--follow-noise', type=float, default=1.1, metavar='R',
-             help='set the noise for the follow module to R')
-g.add_option('-l', '--lane-threshold', type=float, default=4, metavar='S',
+g.add_option('-f', '--follow-threshold', type=float, default=1, metavar='S',
+             help='set the threshold error for the follow module to S')
+g.add_option('-F', '--follow-step', type=float, default=0.1, metavar='R',
+             help='set the random-walk step size for the follow module to R')
+g.add_option('-l', '--lane-threshold', type=float, default=1, metavar='S',
              help='set the threshold variance for the lane module to S')
-g.add_option('-L', '--lane-noise', type=float, default=1.05, metavar='R',
-             help='set the noise for the lane module to R')
-g.add_option('-s', '--speed-threshold', type=float, default=3, metavar='S',
+g.add_option('-L', '--lane-step', type=float, default=0.1, metavar='R',
+             help='set the step size for the lane module to R')
+g.add_option('-s', '--speed-threshold', type=float, default=1, metavar='S',
              help='set the threshold variance for the speed module to S')
-g.add_option('-S', '--speed-noise', type=float, default=1.01, metavar='R',
-             help='set the noise for the speed module to R')
+g.add_option('-S', '--speed-step', type=float, default=0.1, metavar='R',
+             help='set the step size for the speed module to R')
 FLAGS.add_option_group(g)
 
 
@@ -48,32 +48,38 @@ class Simulator:
         self.frame = 0
         self.dt = 1. / opts.control_rate
         self.look_interval = int(opts.control_rate / opts.fixation_rate)
+        self.active_module = 0
 
-        # either read in track data from file, or make curvy circular test tracks.
-        tracks = []
+        # either read in lane data from file, or make curvy circular test lanes.
+        points = []
         if args:
-            tracks.extend(lanes.read(args))
+            points.extend(lanes.read(args))
         else:
-            tracks.extend(lanes.create(radius=100., sample_rate=opts.control_rate, speed=8.))
-        self.tracks = numpy.array(tracks)
+            points.extend(lanes.create(radius=100., sample_rate=opts.control_rate, speed=8.))
+        self.lanes = numpy.array(points)
 
-        # create the leader car and tell it to follow the first track.
-        self.leader = cars.Track(self.tracks[0])
-
-        # create modules for the follower car.
+        # construct modules to control the agent car.
         self.modules = [
-            modules.Speed(threshold=opts.speed_threshold, noise=opts.speed_noise),
-            modules.Follow(threshold=opts.follow_threshold, noise=opts.follow_noise),
-            modules.Lane(tracks, threshold=opts.lane_threshold, noise=opts.lane_noise),
+            modules.Speed(threshold=opts.speed_threshold, step=opts.speed_step),
+            modules.Follow(threshold=opts.follow_threshold, step=opts.follow_step),
+            modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
             ]
 
-        # create the follower car, and position it behind the leader car.
-        self.agent = cars.Modular(self.modules)
+        # construct cars to either drive by module, or to follow lanes.
+        self.cars = [cars.Modular(self.modules)] + [
+            cars.Track(lane) for lane in self.lanes[1:]]
 
         self.reset()
 
-        for m in self.modules:
-            m.observe(self.agent, self.leader)
+    @property
+    def agent(self):
+        '''Return the learning agent.'''
+        return self.cars[0]
+
+    @property
+    def leader(self):
+        '''Return the leader car.'''
+        return self.cars[1]
 
     def reset(self):
         '''Reset the state of the simulation.'''
@@ -91,16 +97,16 @@ class Simulator:
         self.agent.move(self.dt)
         self.leader.move(self.dt)
         if not self.frame % self.look_interval:
-            self.agent.observe(self.leader)
-            print self.report()
+            self.active_module = self.agent.observe(self.leader)
+            print self.frame * self.dt, ' '.join(str(x) for x in self.report())
 
     def report(self):
         '''Return a string capturing the measured state of the simulator.'''
-        return '%s %s %s' % (
-            numpy.linalg.norm(self.leader.target - self.agent.position),
-            self.agent.speed,
-            ' '.join(str(m.variance) for m in self.agent.modules),
-            )
+        yield numpy.linalg.norm(self.leader.target - self.agent.position)
+        yield self.agent.speed
+        for m in self.agent.modules:
+            yield m.error
+        yield self.active_module
 
 
 def main(simulator):
