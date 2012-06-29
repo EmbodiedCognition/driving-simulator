@@ -85,9 +85,9 @@ def main(simulator):
         # draw lanes.
         gl.glLineWidth(2)
         gl.glColor(0, 0, 0)
-        for track in simulator.tracks:
+        for lane in simulator.lanes:
             gl.glBegin(gl.GL_LINE_STRIP)
-            for a, b in track:
+            for a, b in lane:
                 gl.glVertex(a, b, 1)
             gl.glEnd()
 
