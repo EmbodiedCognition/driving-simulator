@@ -48,54 +48,60 @@ def relative_angle(target, source, heading):
 class Estimator:
     '''An estimator holds a distribution over a scalar state variable.
 
-    Estimates are updated whenever the system allocates a look to a module ;
-    whenever the system does not allocate a look, estimates grow in uncertainty.
+    The current implementation uses a sort of particle filter to estimate the
+    variance (uncertainty) in the distribution over the state variable. A small
+    set of particles keep track of the error (distance from last-observed value)
+    in the estimate.
 
-    Estimates are centered around the last-observed value, but then distorted
-    over time through error that accumulates during a random walk. This error is
-    reset whenever the true value is observed.
+    Whenever the system allocates a look to a module, the estimate is recentered
+    at the observed value, and all errors in the estimate are reset to 0.
+    Whenever the system does not allocate a look to a module, estimates grow in
+    uncertainty by displacing the particles through a random walk.
     '''
 
-    def __init__(self, threshold, step):
+    def __init__(self, threshold, step, particles=10):
         '''Initialize this estimator.
 
         threshold: Indicates the maximum tolerated error in the estimate
           before this estimate becomes a candidate for a look.
 
         step: The step size for a random walk in measurement error.
+
+        particles: The number of particles to use for estimating variance.
         '''
         self._threshold = threshold
         self._step = step
-        self._error = 0
         self._value = 0
+        self._errors = numpy.zeros((particles, ), float)
 
     @property
     def value(self):
         '''Get the current estimated value of this parameter.'''
-        return self._value + self._error
+        return self._value + self._errors[rng.randint(len(self._errors))]
 
     @property
-    def error(self):
+    def rmse(self):
         '''Get the current absolute error of this parameter.'''
-        return abs(self._error)
+        return numpy.sqrt((self._errors ** 2).sum())
 
     @property
     def uncertainty(self):
-        '''Uncertainty of a module is exp(|error| - threshold).
+        '''Uncertainty of a module is exp(rmse - threshold).
 
         This value is small for error below the threshold, and large for error
         exceeding the threshold.
         '''
-        return numpy.exp(self.error - self._threshold)
+        return numpy.exp(self.rmse - self._threshold)
 
     def step(self):
-        '''Potentially increase the error by taking a random step.'''
-        self._error += [1, -1][rng.uniform() > 0.5] * self._step
+        '''Distort the error in our estimate by taking a random step.'''
+        samples = rng.uniform(size=len(self._errors))
+        self._errors += self._step * numpy.where(samples > 0.5, -1, 1)
 
     def observe(self, value):
         '''Reset the estimated value and error to standard values.'''
         self._value = value
-        self._error = 0
+        self._errors[:] = 0
 
 
 class Module:
@@ -103,12 +109,8 @@ class Module:
 
     Estimates of state values are handled by the Estimator class.
 
-    This class contains wrapper methods that allow handling all of the set of
-    estimators in a straightforward way ; for example, the reset() method resets
-    all the estimators in the module.
-
-    This class also contains some higher-level methods for providing control
-    signals to a driving agent (the control() and _control() methods), and for
+    This class contains some high-level methods for providing control signals to
+    a driving agent (the control() and _control() methods), and for
     incorporating state updates based on observations of the world (the
     observe() and _observe() methods).
 
@@ -139,11 +141,6 @@ class Module:
     def uncertainty(self):
         '''Return the uncertainty of the distance estimator.'''
         return self.estimators['distance'].uncertainty
-
-    @property
-    def error(self):
-        '''Return the error of the distance estimator.'''
-        return self.estimators['distance'].error
 
     def observe(self, agent, leader):
         '''Update this module given the true states of the agent and leader.'''
@@ -198,11 +195,6 @@ class Speed(Module):
     def uncertainty(self):
         '''Return the uncertainty of the speed estimator.'''
         return self.estimators['speed'].uncertainty
-
-    @property
-    def error(self):
-        '''Return the error of the speed estimator.'''
-        return self.estimators['speed'].error
 
     def _setup(self, threshold, step):
         '''Set up this module with the target speed.'''

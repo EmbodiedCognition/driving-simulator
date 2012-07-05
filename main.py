@@ -105,7 +105,7 @@ class Simulator:
         yield numpy.linalg.norm(self.leader.target - self.agent.position)
         yield self.agent.speed
         for m in self.agent.modules:
-            yield m.error
+            yield m.uncertainty
         yield self.active_module
 
 
