@@ -8,6 +8,8 @@ import cars
 import lanes
 import modules
 
+TAU = 2 * numpy.pi
+
 FLAGS = optparse.OptionParser('Usage: main.py [options] [lane-files]')
 FLAGS.add_option('-g', '--gl', action='store_true',
                  help='run the simulator with the OpenGL visualization')
