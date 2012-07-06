@@ -13,10 +13,12 @@ FLAGS.add_option('-g', '--gl', action='store_true',
                  help='run the simulator with the OpenGL visualization')
 FLAGS.add_option('-i', '--iterations', type=int, metavar='K',
                  help='run the simulation for K control iterations')
-FLAGS.add_option('-r', '--control-rate', type=float, default=20., metavar='N',
+FLAGS.add_option('-r', '--control-rate', type=float, default=60., metavar='N',
                  help='run the simulation at N Hz')
 FLAGS.add_option('-R', '--fixation-rate', type=int, default=3, metavar='M',
                  help='schedule fixations at M Hz')
+FLAGS.add_option('-t', '--trace', action='store_true',
+                 help='trace the locations of all cars into agent_xx.txt')
 
 g = optparse.OptionGroup(FLAGS, 'Modules')
 g.add_option('-f', '--follow-threshold', type=float, default=1, metavar='S',
@@ -71,6 +73,14 @@ class Simulator:
 
         self.reset()
 
+        self.handles = []
+        if opts.trace:
+            self.handles = [
+                open('agent_%02d.path' % i, 'w') for i in range(len(self.cars))]
+
+    def __del__(self):
+        [h.close() for h in self.handles]
+
     @property
     def agent(self):
         '''Return the learning agent.'''
@@ -94,11 +104,27 @@ class Simulator:
         self.frame += 1
         if self.frame == self.opts.iterations:
             raise StopIteration
+
         self.agent.move(self.dt)
         self.leader.move(self.dt)
+
         if not self.frame % self.look_interval:
             self.active_module = self.agent.observe(self.leader)
             print self.frame * self.dt, ' '.join(str(x) for x in self.report())
+
+        if self.handles:
+            for car, handle in zip(self.cars, self.handles):
+                # time offset of frame.
+                print >> handle, self.frame * self.dt,
+
+                # x, y, z of car.
+                print >> handle, car.position[0], car.position[1], 0.067,
+
+                # quaternion containing angle of car.
+                t = (car.angle + TAU / 4) / 2
+                print >> handle, 0., 0., numpy.sin(t), numpy.cos(t),
+
+                print >> handle
 
     def report(self):
         '''Return a string capturing the measured state of the simulator.'''
