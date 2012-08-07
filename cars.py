@@ -110,8 +110,7 @@ class Modular(Car):
     tend to keep this car going in a reasonably lifelike manner.
     '''
 
-    def __init__(self, modules, sprague_ballard=False):
-        self.sprague_ballard = sprague_ballard
+    def __init__(self, modules):
         self.modules = modules
         self.reset()
 
@@ -124,10 +123,7 @@ class Modular(Car):
 
     def observe(self, leader):
         '''Pass the position of the leader to one module for update.'''
-        select = self.select_by_uncertainty
-        if self.sprague_ballard:
-            select = self.select_sprague_ballard
-        m = select()
+        m = self.select_by_uncertainty()
         self.modules[m].observe(self, leader)
         return m
 
@@ -138,10 +134,6 @@ class Modular(Car):
             w = numpy.ones_like(w)
         cdf = w.cumsum()
         return cdf.searchsorted(rng.uniform(0, cdf[-1]))
-
-    def select_sprague_ballard(self):
-        '''We select a module for update based on Sprague & Ballard.'''
-        raise NotImplementedError
 
     def control(self, dt):
         '''Calculate a speed/angle control signal for a time slice dt.'''
