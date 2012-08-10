@@ -24,8 +24,9 @@ def pid_controller(kp=0., ki=0., kd=0.):
     '''This function creates a PID controller with the given constants.'''
     state = {'integral': 0, 'error': 0}
     def control(error, dt=1):
-        state['integral'] += error * dt
         derivative = (error - state['error']) / dt
+        state['error'] = error
+        state['integral'] += error * dt
         return kp * error + ki * state['integral'] + kd * derivative
     return control
 
@@ -179,7 +180,7 @@ class Speed(Module):
 
     def _setup(self, threshold=1, step=0.1):
         '''Set up this module with the target speed.'''
-        self._pedal = pid_controller(kp=0.01)
+        self._pedal = pid_controller(kp=0.005)
 
         yield 'speed', Estimator(threshold=threshold, step=step)
 
@@ -203,7 +204,7 @@ class Follow(Module):
 
     def _setup(self, threshold=1, step=0.1, angle_scale=1e-2):
         '''Create PID controllers for distance and angle.'''
-        self._pedal = pid_controller(kp=0.001, kd=0.0005)
+        self._pedal = pid_controller(kp=0.01, kd=0.005)
         self._steer = pid_controller(kp=0.01)
 
         yield 'distance', Estimator(threshold=threshold, step=step)
