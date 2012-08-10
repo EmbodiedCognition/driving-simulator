@@ -27,9 +27,9 @@ g.add_option('-f', '--follow-threshold', type=float, default=1, metavar='S',
              help='set the threshold error for the follow module to S')
 g.add_option('-F', '--follow-step', type=float, default=0.1, metavar='R',
              help='set the random-walk step size for the follow module to R')
-g.add_option('-l', '--lane-threshold', type=float, default=1, metavar='S',
+g.add_option('-l', '--lane-threshold', type=float, default=0.1, metavar='S',
              help='set the threshold variance for the lane module to S')
-g.add_option('-L', '--lane-step', type=float, default=0.1, metavar='R',
+g.add_option('-L', '--lane-step', type=float, default=0.01, metavar='R',
              help='set the step size for the lane module to R')
 g.add_option('-s', '--speed-threshold', type=float, default=1, metavar='S',
              help='set the threshold variance for the speed module to S')
@@ -68,6 +68,10 @@ class Simulator:
             modules.Follow(threshold=opts.follow_threshold, step=opts.follow_step),
             modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
             ]
+
+        for m in self.modules:
+            print m
+            print
 
         # construct cars to either drive by module, or to follow lanes.
         self.cars = [cars.Modular(self.modules)] + [
@@ -112,7 +116,8 @@ class Simulator:
 
         if not self.frame % self.look_interval:
             self.active_module = self.agent.observe(self.leader)
-            print self.frame * self.dt, ' '.join(str(x) for x in self.report())
+            print '%.2f' % (self.frame * self.dt),
+            print ' '.join('%.3f' % x for x in self.report())
 
         if self.handles:
             for car, handle in zip(self.cars, self.handles):
@@ -133,6 +138,8 @@ class Simulator:
         yield numpy.linalg.norm(self.leader.target - self.agent.position)
         yield self.agent.speed
         for m in self.agent.modules:
+            #yield m.rmse
+            #yield m.threshold
             yield m.uncertainty
         yield self.active_module
 
