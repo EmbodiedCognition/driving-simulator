@@ -11,7 +11,6 @@ maintain a target speed), and a Lane module (which tries to keep the driving
 agent in the nearest lane).
 '''
 
-import collections
 import math
 import numpy
 import numpy.random as rng
@@ -21,15 +20,13 @@ import cars
 TAU = 2 * numpy.pi
 
 
-def pid_controller(kp=0., ki=0., kd=0., history=2):
+def pid_controller(kp=0., ki=0., kd=0.):
     '''This function creates a PID controller with the given constants.'''
-    memory = collections.deque([0] * history, maxlen=max(2, history))
+    state = {'integral': 0, 'error': 0}
     def control(error, dt=1):
-        memory.append(error)
-        errors = numpy.array(memory)
-        integral = (errors * dt).sum()
-        derivative = (errors[-1] - errors[-2]) / dt
-        return kp * error + ki * integral + kd * derivative
+        state['integral'] += error * dt
+        derivative = (error - state['error']) / dt
+        return kp * error + ki * state['integral'] + kd * derivative
     return control
 
 
@@ -73,6 +70,9 @@ class Estimator:
         self._step = step
         self._value = 0
         self._errors = numpy.zeros((particles, ), float)
+
+    def __str__(self):
+        return 'threshold: %s, step: %s' % (self._threshold, self._step)
 
     @property
     def value(self):
@@ -122,6 +122,11 @@ class Module:
     def __init__(self, *args, **kwargs):
         self.estimators = dict(self._setup(*args, **kwargs))
 
+    def __str__(self):
+        return '%s module\n%s' % (
+            self.__class__.__name__.lower(),
+            '\n'.join('%s: %s' % i for i in self.estimators.iteritems()))
+
     @property
     def est_distance(self):
         '''Return the estimated distance for this module, if any.'''
@@ -138,9 +143,19 @@ class Module:
         return self.estimators['angle'].value
 
     @property
+    def rmse(self):
+        '''Return the uncertainty of the speed estimator.'''
+        return self.estimators[self.KEY].rmse
+
+    @property
+    def threshold(self):
+        '''Return the uncertainty of the speed estimator.'''
+        return self.estimators[self.KEY]._threshold
+
+    @property
     def uncertainty(self):
-        '''Return the uncertainty of the distance estimator.'''
-        return self.estimators['distance'].uncertainty
+        '''Return the uncertainty of the speed estimator.'''
+        return self.estimators[self.KEY].uncertainty
 
     def observe(self, agent, leader):
         '''Update this module given the true states of the agent and leader.'''
@@ -154,6 +169,29 @@ class Module:
         return self._control(dt)
 
 
+class Speed(Module):
+    '''This module attempts to maintain a specific target speed.
+
+    The relevant state variable for this task is the driving agent's speed.
+    '''
+
+    KEY = 'speed'
+
+    def _setup(self, threshold=1, step=0.1):
+        '''Set up this module with the target speed.'''
+        self._pedal = pid_controller(kp=0.01)
+
+        yield 'speed', Estimator(threshold=threshold, step=step)
+
+    def _observe(self, agent, leader):
+        '''Update the module by observing the actual speed of the agent.'''
+        yield 'speed', agent.speed
+
+    def _control(self, dt):
+        '''Return the delta between target and current speeds as a control.'''
+        return self._pedal(self.est_speed - cars.TARGET_SPEED, dt), None
+
+
 class Follow(Module):
     '''This module attempts to follow a leader car.
 
@@ -161,15 +199,17 @@ class Follow(Module):
     and the relative angle to the leader car.
     '''
 
-    def _setup(self, threshold, step, distance_scale=1e-1, angle_scale=1e-3):
-        '''Create PID controllers for distance and angle.'''
-        self._pedal = pid_controller(kp=1, kd=2)
-        self._steer = pid_controller(kp=1, ki=0.1)
+    KEY = 'distance'
 
-        yield 'distance', Estimator(
-            distance_scale * threshold, distance_scale * step)
+    def _setup(self, threshold=1, step=0.1, angle_scale=1e-2):
+        '''Create PID controllers for distance and angle.'''
+        self._pedal = pid_controller(kp=0.001, kd=0.0005)
+        self._steer = pid_controller(kp=0.01)
+
+        yield 'distance', Estimator(threshold=threshold, step=step)
         yield 'angle', Estimator(
-            angle_scale * threshold, angle_scale * step)
+            threshold=angle_scale * threshold,
+            step=angle_scale * step)
 
         self.ahead = True
 
@@ -182,33 +222,7 @@ class Follow(Module):
 
     def _control(self, dt):
         '''Issue PID control signals for distance and angle.'''
-        return self._pedal(self.est_distance), self._steer(self.est_angle)
-
-
-class Speed(Module):
-    '''This module attempts to maintain a specific target speed.
-
-    The relevant state variable for this task is the driving agent's speed.
-    '''
-
-    @property
-    def uncertainty(self):
-        '''Return the uncertainty of the speed estimator.'''
-        return self.estimators['speed'].uncertainty
-
-    def _setup(self, threshold, step):
-        '''Set up this module with the target speed.'''
-        self._pedal = pid_controller(kp=1, kd=2)
-
-        yield 'speed', Estimator(threshold, step)
-
-    def _observe(self, agent, leader):
-        '''Update the module by observing the actual speed of the agent.'''
-        yield 'speed', agent.speed
-
-    def _control(self, dt):
-        '''Return the delta between target and current speeds as a control.'''
-        return self._pedal((self.est_speed - cars.TARGET_SPEED) * dt), None
+        return self._pedal(self.est_distance, dt), self._steer(self.est_angle, dt)
 
 
 class Lane(Module):
@@ -217,29 +231,28 @@ class Lane(Module):
     The relevant state variable for this task is the angle to the nearest lane.
     '''
 
-    def _setup(self, lanes, threshold, step, distance_scale=1e-1, angle_scale=1e-3):
+    KEY = 'angle'
+
+    @property
+    def uncertainty(self):
+        return 0.0
+
+    def _setup(self, lanes, threshold=1, step=0.1):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
-        self._steer = pid_controller(kp=1, ki=0.1)
-
-        yield 'distance', Estimator(
-            distance_scale * threshold, distance_scale * step)
-        yield 'angle', Estimator(
-            angle_scale * threshold, angle_scale * step)
+        self._steer = pid_controller(kp=0.01)
+        yield 'angle', Estimator(threshold=threshold, step=step)
 
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
         dists = ((self.lanes - agent.position) ** 2).sum(axis=-1)
         l, t = numpy.unravel_index(dists.argmin(), dists.shape)
 
-        # update our distance estimate.
-        yield 'distance', numpy.linalg.norm(self.lanes[l, t] - agent.position)
-
         # update the angle to the lane based on the position of the lane at some
         # short distance ahead.
-        t = (t + 20) % dists.shape[1]
+        t = (t + 50) % dists.shape[1]
         yield 'angle', relative_angle(self.lanes[l, t], agent.position, agent.angle)
 
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
-        return None, self._steer(self.est_angle)
+        return None, self._steer(self.est_angle, dt)
