@@ -8,8 +8,7 @@ import sys
 
 TAU = 2 * math.pi
 
-REALITY_ALPHA = 0.3
-ESTIMATE_ALPHA = 0.7
+ESTIMATE = False
 
 
 def draw_cone(color, pos, vel, speed):
@@ -26,7 +25,7 @@ def draw_cone(color, pos, vel, speed):
     gl.glRotate(90, 1, 0, 0)
 
     q = glu.gluNewQuadric()
-    glu.gluCylinder(q, 2, 0, max(1, speed), 10, 10)
+    glu.gluCylinder(q, 2, 0, max(1, speed), 20, 20)
     glu.gluDeleteQuadric(q)
 
     gl.glPopMatrix()
@@ -41,7 +40,7 @@ def draw_sphere(color, pos, radius=2):
     gl.glTranslate(x, y, 3)
 
     q = glu.gluNewQuadric()
-    glu.gluSphere(q, radius, 10, 10)
+    glu.gluSphere(q, radius, 20, 20)
     glu.gluDeleteQuadric(q)
 
     gl.glPopMatrix()
@@ -52,6 +51,15 @@ elapsed = 0
 def main(simulator):
     fig = glumpy.figure()
     world = fig.add_figure()
+
+    @fig.event
+    def on_init():
+        gl.glEnable(gl.GL_BLEND)
+        gl.glEnable(gl.GL_DEPTH_TEST)
+        gl.glEnable(gl.GL_BLEND)
+        gl.glEnable(gl.GL_COLOR_MATERIAL)
+        gl.glColorMaterial(gl.GL_FRONT_AND_BACK, gl.GL_AMBIENT_AND_DIFFUSE)
+        gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
     @fig.event
     def on_draw():
@@ -92,8 +100,8 @@ def main(simulator):
             gl.glEnd()
 
         # draw cars.
-        simulator.agent.draw(sys.modules[__name__], 1, 1, 0, REALITY_ALPHA)
-        simulator.leader.draw(sys.modules[__name__], 1, 0, 0, REALITY_ALPHA)
+        simulator.leader.draw(sys.modules[__name__], 1, 0, 0)
+        simulator.agent.draw(sys.modules[__name__], 1, 1, 0)
 
         gl.glPopMatrix()
 
@@ -114,8 +122,8 @@ def main(simulator):
         if key == glumpy.window.key.ESCAPE:
             sys.exit()
         elif key == glumpy.window.key.SPACE:
-            global ESTIMATE_ALPHA, REALITY_ALPHA
-            ESTIMATE_ALPHA, REALITY_ALPHA = REALITY_ALPHA, ESTIMATE_ALPHA
+            global ESTIMATE
+            ESTIMATE ^= ESTIMATE
         else:
             simulator.reset()
         fig.redraw()
