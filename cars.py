@@ -13,11 +13,12 @@ import numpy.random as rng
 TAU = 2 * numpy.pi
 
 TARGET_SPEED = 4.
-TARGET_DISTANCE = 50
+TARGET_DISTANCE = 20.
+TARGET_INDEX = 100
 
 MAX_SPEED = 10.
 MAX_STEER = TAU / 20.
-MAX_PEDAL = 0.5
+MAX_PEDAL = 0.1
 
 
 class Car(object):
@@ -55,11 +56,11 @@ class Car(object):
     def move(self, dt):
         '''Move this car through a given slice of time.'''
         pedal, steer = self.control(dt)
-        self.speed = numpy.clip(self.speed + dt * pedal, 0, MAX_SPEED)
-        self.angle += dt * steer
-        while self.angle < -TAU / 2:
+        self.speed = numpy.clip(self.speed + pedal, 1e-3, MAX_SPEED)
+        self.angle += steer
+        while self.angle < 0:
             self.angle += TAU
-        while self.angle > TAU / 2:
+        while self.angle > TAU:
             self.angle -= TAU
         self.position += dt * self.velocity
 
@@ -70,6 +71,7 @@ class Car(object):
     def draw(self, gfx, *color):
         '''Draw this car as a cone in the graphics visualization.'''
         gfx.draw_cone(color, self.position, self.velocity, self.speed)
+        gfx.draw_sphere(color, self.target, 0.5)
 
 
 class Track(Car):
@@ -85,12 +87,12 @@ class Track(Car):
 
     @property
     def target(self):
-        i = (self.index - TARGET_DISTANCE) % len(self.track)
+        i = (self.index - TARGET_INDEX) % len(self.track)
         return self.track[i]
 
     def reset(self, leader=None):
         '''Move this car to the beginning of the lane.'''
-        self.index = TARGET_DISTANCE
+        self.index = TARGET_INDEX
         self.position = self.track[self.index].copy()
         self.move(1)
 
@@ -124,6 +126,8 @@ class Modular(Car):
     def observe(self, leader):
         '''Pass the position of the leader to one module for update.'''
         m = self.select_by_uncertainty()
+        if m == 1:
+            self.modules[2].observe(self, leader)
         self.modules[m].observe(self, leader)
         return m
 
@@ -139,11 +143,12 @@ class Modular(Car):
         '''Calculate a speed/angle control signal for a time slice dt.'''
         pedal = steer = 0
         for m in self.modules:
+            z = max(1, m.uncertainty)
             p, s = m.control(dt)
             if p is not None:
-                pedal += p / m.uncertainty
+                pedal += p / z
             if s is not None:
-                steer += s / m.uncertainty
+                steer += s / z
         return (numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL),
                 numpy.clip(steer, -MAX_STEER, MAX_STEER))
 
@@ -151,23 +156,24 @@ class Modular(Car):
         '''Draw this car into the graphical visualization.'''
         speed, follow, lane = self.modules
 
-        gfx.draw_cone((0.8, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
-                      self.position, self.velocity, speed.est_speed)
+        if gfx.ESTIMATE:
+            gfx.draw_cone((0.8, 0.8, 0.2),
+                          self.position, self.velocity, speed.est_speed)
+        else:
+            super(Modular, self).draw(gfx, *color)
 
-        def unit(r, a):
+        def cartesian(r, a):
             a += self.angle
             return self.position + r * numpy.array([numpy.cos(a), numpy.sin(a)])
 
         # draw a red sphere at the estimate of the leader car's sweet spot.
-        d = [-1, 1][follow.ahead] * follow.est_distance
-        gfx.draw_sphere((0.8, 0.2, 0.2, gfx.ESTIMATE_ALPHA),
-                        unit(d, follow.est_angle),
-                        numpy.sqrt(follow.uncertainty))
+        d = follow.est_distance
+        gfx.draw_sphere((0.8, 0.2, 0.2, 0.5),
+                        cartesian(d, follow.est_angle),
+                        numpy.sqrt(1 + follow.uncertainty))
 
         # draw a green sphere near the driving agent to represent the estimated
         # angle to the nearest lane.
-        gfx.draw_sphere((0.2, 0.8, 0.2, gfx.ESTIMATE_ALPHA),
-                        unit(15, lane.est_angle),
-                        numpy.sqrt(lane.uncertainty))
-
-        super(Modular, self).draw(gfx, *color)
+        gfx.draw_sphere((0.2, 0.8, 0.2, 0.5),
+                        cartesian(12, lane.est_angle),
+                        numpy.sqrt(1 + lane.uncertainty))
