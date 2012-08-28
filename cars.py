@@ -12,13 +12,17 @@ import numpy.random as rng
 
 TAU = 2 * numpy.pi
 
-TARGET_SPEED = 4.
+TARGET_SPEED = 18.
 TARGET_DISTANCE = 20.
 TARGET_INDEX = 100
 
-MAX_SPEED = 10.
+MAX_SPEED = 30.
 MAX_STEER = TAU / 20.
 MAX_PEDAL = 0.1
+
+
+class Error(Exception): pass
+class EndOfTrack(Error): pass
 
 
 class Car(object):
@@ -71,13 +75,14 @@ class Car(object):
     def draw(self, gfx, *color):
         '''Draw this car as a cone in the graphics visualization.'''
         gfx.draw_cone(color, self.position, self.velocity, self.speed)
-        gfx.draw_sphere(color, self.target, 0.5)
+        gfx.draw_sphere(color, self.target, 1)
 
 
 class Track(Car):
     '''A track car follows a list of positions that define a lane.
 
-    The speed and angle for this car are determined by the points that make
+    The speed and angle for this car are determined by the points that make up
+    the lane.
     '''
 
     def __init__(self, track):
@@ -97,8 +102,11 @@ class Track(Car):
         self.move(1)
 
     def move(self, dt):
-        self.index = (self.index + 1) % len(self.track)
-        dx, dy = self.track[self.index] - self.position
+        self.index += 1
+        try:
+            dx, dy = self.track[self.index] - self.position
+        except IndexError:
+            raise EndOfTrack
         self.speed = math.sqrt(dx * dx + dy * dy) / dt
         self.angle = math.atan2(dy, dx)
         self.position = self.track[self.index].copy()
@@ -114,6 +122,7 @@ class Modular(Car):
 
     def __init__(self, modules):
         self.modules = modules
+        self.observed_module = self.modules[0]
         self.reset()
 
     def reset(self, leader=None):
@@ -129,6 +138,7 @@ class Modular(Car):
         if m == 1:
             self.modules[2].observe(self, leader)
         self.modules[m].observe(self, leader)
+        self.observed_module = self.modules[m]
         return m
 
     def select_by_uncertainty(self):
@@ -143,12 +153,11 @@ class Modular(Car):
         '''Calculate a speed/angle control signal for a time slice dt.'''
         pedal = steer = 0
         for m in self.modules:
-            z = max(1, m.uncertainty)
             p, s = m.control(dt)
-            if p is not None:
-                pedal += p / z
+            if m is self.observed_module:
+                pedal += p
             if s is not None:
-                steer += s / z
+                steer += s
         return (numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL),
                 numpy.clip(steer, -MAX_STEER, MAX_STEER))
 

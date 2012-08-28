@@ -13,8 +13,6 @@ TAU = 2 * numpy.pi
 FLAGS = optparse.OptionParser('Usage: main.py [options] [lane-files]')
 FLAGS.add_option('-g', '--gl', action='store_true',
                  help='run the simulator with the OpenGL visualization')
-FLAGS.add_option('-i', '--iterations', type=int, metavar='K',
-                 help='run the simulation for K control iterations')
 FLAGS.add_option('-r', '--control-rate', type=float, default=60., metavar='N',
                  help='run the simulation at N Hz')
 FLAGS.add_option('-R', '--fixation-rate', type=int, default=3, metavar='M',
@@ -55,12 +53,11 @@ class Simulator:
         self.active_module = 0
 
         # either read in lane data from file, or make curvy circular test lanes.
-        points = []
+        #points = lanes.clover(radius=100., sample_rate=opts.control_rate, speed=8.)
+        points = lanes.linear(sample_rate=opts.control_rate, speed=20.)
         if args:
-            points.extend(lanes.read(args))
-        else:
-            points.extend(lanes.create(radius=100., sample_rate=opts.control_rate, speed=8.))
-        self.lanes = numpy.array(points)
+            points = lanes.read(args)
+        self.lanes = numpy.array(list(points))
 
         # construct modules to control the agent car.
         self.modules = [
@@ -69,13 +66,9 @@ class Simulator:
             modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
             ]
 
-        for m in self.modules:
-            print m
-            print
-
         # construct cars to either drive by module, or to follow lanes.
-        self.cars = [cars.Modular(self.modules)] + [
-            cars.Track(lane) for lane in self.lanes[1:]]
+        self.cars = [cars.Modular(self.modules), cars.Track(self.lanes[1])] + [
+            cars.Track(l) for l in self.lanes[2:]]
 
         self.reset()
 
@@ -101,6 +94,7 @@ class Simulator:
         '''Reset the state of the simulation.'''
         self.leader.reset()
         self.agent.reset(self.leader)
+        [c.reset() for c in self.cars[2:]]
 
     def step(self):
         '''Increment the simulation by one control step.
@@ -108,11 +102,12 @@ class Simulator:
         If appropriate, choose the next look and print out a report line.
         '''
         self.frame += 1
-        if self.frame == self.opts.iterations:
-            raise StopIteration
 
-        self.agent.move(self.dt)
-        self.leader.move(self.dt)
+        for car in self.cars:
+            try:
+                car.move(self.dt)
+            except cars.EndOfTrack:
+                raise StopIteration
 
         if not self.frame % self.look_interval:
             self.active_module = self.agent.observe(self.leader)
@@ -135,12 +130,17 @@ class Simulator:
 
     def report(self):
         '''Return a string capturing the measured state of the simulator.'''
-        yield numpy.linalg.norm(self.leader.target - self.agent.position)
-        yield self.agent.speed
+        err = self.leader.target - self.agent.position
+        sign = [1, -1][numpy.dot(err, self.agent.velocity) < 0]
+        yield sign * numpy.linalg.norm(err)
+
+        yield cars.TARGET_SPEED - self.agent.speed
+
         for m in self.agent.modules:
             #yield m.rmse
             #yield m.threshold
             yield m.uncertainty
+
         yield self.active_module
 
 
