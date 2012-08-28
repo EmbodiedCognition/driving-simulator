@@ -180,7 +180,7 @@ class Speed(Module):
 
     def _setup(self, threshold=1, step=0.1):
         '''Set up this module with the target speed.'''
-        self._pedal = pid_controller(kp=0.005)
+        self._pedal = pid_controller(kp=0.5, kd=0.05)
 
         yield 'speed', Estimator(threshold=threshold, step=step)
 
@@ -190,7 +190,7 @@ class Speed(Module):
 
     def _control(self, dt):
         '''Return the delta between target and current speeds as a control.'''
-        return self._pedal(self.est_speed - cars.TARGET_SPEED, dt), None
+        return self._pedal(cars.TARGET_SPEED - self.est_speed, dt), None
 
 
 class Follow(Module):
@@ -202,9 +202,9 @@ class Follow(Module):
 
     KEY = 'distance'
 
-    def _setup(self, threshold=1, step=0.1, angle_scale=1e-2):
+    def _setup(self, threshold=1, step=0.1, angle_scale=0.1):
         '''Create PID controllers for distance and angle.'''
-        self._pedal = pid_controller(kp=0.01, kd=0.005)
+        self._pedal = pid_controller(kp=0.2, kd=0.1)
         self._steer = pid_controller(kp=0.01)
 
         yield 'distance', Estimator(threshold=threshold, step=step)
@@ -256,4 +256,5 @@ class Lane(Module):
 
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
+        return None, None
         return None, self._steer(self.est_angle, dt)
