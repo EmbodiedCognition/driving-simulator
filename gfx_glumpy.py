@@ -25,7 +25,7 @@ def draw_cone(color, pos, vel, speed):
     gl.glRotate(90, 1, 0, 0)
 
     q = glu.gluNewQuadric()
-    glu.gluCylinder(q, 2, 0, max(1, speed), 20, 20)
+    glu.gluCylinder(q, 2, 0, max(1, speed / 3), 20, 20)
     glu.gluDeleteQuadric(q)
 
     gl.glPopMatrix()
@@ -81,12 +81,14 @@ def main(simulator):
         gl.glVertex(x, y + h, 0)
         gl.glEnd()
 
-        z = min(w, h) / 250.
+        z = min(w, h) / 300.
         gl.glPushMatrix()
         gl.glLoadIdentity()
         gl.glTranslate(x + w / 2., y + h / 2., 10)
         gl.glScale(z, z, 1)
-        #gl.glTranslate(-leader.position[0], -leader.position[1], 0)
+
+        a, b = simulator.agent.position
+        gl.glTranslate(-a, -b, 0)
 
         gl.glLight(gl.GL_LIGHT0, gl.GL_POSITION, (0, 0, 100, 1))
 
