@@ -13,12 +13,12 @@ def read(filenames):
             yield arr[:, i:i+2]
 
 
-def create(num_lanes=2,
+def clover(num_lanes=2,
            lane_spacing=3.,
            radius=500.,
            sample_rate=10.,
            speed=7.):
-    '''Create a set of lane data for use in a simulated driving world.
+    '''Create a set of clover-shaped lanes for use in a simulated driving world.
 
     num_lanes: The number of lanes to create.
     lane_spacing: The spacing (in meters) of the centers of each lane.
@@ -59,3 +59,27 @@ def create(num_lanes=2,
         #if i < num_lanes // 2:
         #    lane = lane[::-1]
         yield lane
+
+
+def linear(num_lanes=2,
+           lane_spacing=3.,
+           sample_rate=10.,
+           speed=7.,
+           length=2000.):
+    '''Create a set of straight lanes for use in a simulated driving world.
+
+    num_lanes: The number of lanes to create.
+    lane_spacing: The spacing (in meters) of the centers of each lane.
+    sample_rate: The number of samples per second to record each lane position.
+    speed: The speed of the virtual car (in meters per second) that is recording
+      the lane positions.
+    length: The length of the lanes (in meters).
+    '''
+    lanes = [[] for _ in range(num_lanes)]
+    x = 0
+    while x < length:
+        for i, lane in enumerate(lanes):
+            lane.append((x, i * lane_spacing))
+        x += speed / sample_rate
+    for lane in lanes:
+        yield numpy.asarray(lane)
