@@ -1,5 +1,7 @@
 #!/bin/bash
 
+mkdir -p data
+
 for t in 0.1 0.2 0.5 1 2 5 10
 do
     for s in 0.05 0.10 0.20
