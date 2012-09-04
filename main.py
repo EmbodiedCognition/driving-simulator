@@ -54,7 +54,7 @@ class Simulator:
 
         # either read in lane data from file, or make curvy circular test lanes.
         #points = lanes.clover(radius=100., sample_rate=opts.control_rate, speed=8.)
-        points = lanes.linear(sample_rate=opts.control_rate, speed=20.)
+        points = lanes.linear(sample_rate=opts.control_rate, speed=10.)
         if args:
             points = lanes.read(args)
         self.lanes = numpy.array(list(points))
@@ -117,7 +117,7 @@ class Simulator:
         if self.handles:
             for car, handle in zip(self.cars, self.handles):
                 # time offset of frame.
-                print >> handle, self.frame * self.dt,
+                print >> handle, self.frame * self.dt * 0.6,
 
                 # x, y, z of car.
                 print >> handle, car.position[0], car.position[1], 0.067,
