@@ -12,13 +12,18 @@ runs = []
 intervals = [[], []]
 for filename in sys.argv[2:]:
     data = numpy.loadtxt(filename)
-    for m, rows in itertools.groupby(data, operator.itemgetter(6)):
-        intervals[int(m)].append(len(list(rows)))
+    #for m, rows in itertools.groupby(data, operator.itemgetter(6)):
+    #    intervals[int(m)].append(len(list(rows)))
     runs.append(data)
 runs = numpy.asarray(runs)
 
+stride = 3
 n = runs.shape[0]  # n is the number of runs for each scenario.
-t = numpy.arange(runs.shape[1]) / 3.  # t is the time steps for each run.
+t = numpy.arange(runs.shape[1])[::stride] / 3.  # t is the time steps for each run.
+s = numpy.sqrt(n)
+
+follow = runs[:, ::stride, 1]
+speed = runs[:, ::stride, 2]
 
 print sys.argv[1], '-- loaded data', runs.shape
 
@@ -29,29 +34,43 @@ pl.xlabel('Look duration (x 1/3 second)')
 pl.ylabel('Look count')
 pl.xlim(1, 10)
 pl.legend()
-pl.savefig('%s-look-durations.png' % sys.argv[1])
 
+pl.savefig('%s-look-durations.png' % sys.argv[1])
+pl.clf()
+
+# plot the speed and follow error on one figure, as a phase plane
+
+pl.errorbar(follow.mean(axis=0), speed.mean(axis=0),
+            xerr=follow.std(axis=0) / s, yerr=speed.std(axis=0) / s,
+            fmt='.', mew=0)
+pl.xlim(-5, 20)
+pl.xlabel('Follow Error (m)')
+pl.ylim(-3, 1)
+pl.ylabel('Speed Error (m/s)')
+pl.grid(True)
+
+pl.savefig('%s-phase.png' % sys.argv[1])
 pl.clf()
 
 # plot the speed and follow error on one figure, using two axes (via pl.twinx())
 
-s = numpy.sqrt(n)
-d = runs[:, :, 1]
-lf = pl.errorbar(t, d.mean(axis=0), yerr=d.std(axis=0) / s, color='b')
+lf = pl.errorbar(t, follow.mean(axis=0), yerr=follow.std(axis=0) / s, color='b')
 pl.ylabel('Follow Error (m)')
-pl.ylim(0, 20)
+pl.ylim(-5, 20)
+pl.xlim(t[0], t[-1])
 
 pl.twinx()
 
-d = runs[:, :, 2]
-ls = pl.errorbar(t, d.mean(axis=0), yerr=d.std(axis=0) / s, color='g')
+ls = pl.errorbar(t, speed.mean(axis=0), yerr=speed.std(axis=0) / s, color='g')
 #for r in runs:
 #    ls = pl.plot(r[:, 0], r[:, 2], 'go', alpha=0.1, mew=0)
 pl.ylabel('Speed Error (m/s)')
-pl.ylim(-4, 0)
+pl.ylim(-3, 1)
+pl.xlim(t[0], t[-1])
 pl.grid(True)
 
 pl.title('Task Error')
 pl.xlabel('Time (s)')
 pl.legend((lf, ls), ('Follow', 'Speed'), loc='lower right')
+
 pl.savefig('%s-error.png' % sys.argv[1])
