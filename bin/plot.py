@@ -35,6 +35,8 @@ FOLLOW = 1
 SPEED = 2
 MODULE = 6
 
+COLORS = 'krbgmcy'
+
 
 def keys(f):
     m = re.search(r'follow-1-0.1-speed-([.\d]+)-([.\d]+)\.\d+\.log', f)
@@ -133,10 +135,10 @@ class Plotter:
         ax = pl.subplot(111)
         for s, step in enumerate(self.steps):
             d = self.runs[s, :, :, :, MODULE].mean(axis=-1)
-            ax.errorbar(self.thresholds,
-                        d.mean(axis=-1),
-                        d.std(axis=-1) / np.sqrt(d.shape[-1]),
-                        label='Speed noise %s' % step)
+            m = d.mean(axis=-1)
+            e = d.std(axis=-1) / np.sqrt(d.shape[-1])
+            ax.plot(self.thresholds, m, label='Speed noise %s' % step, color=COLORS[s])
+            ax.fill_between(self.thresholds, m - e, m + e, alpha=0.3, lw=0, color=COLORS[s])
         ax.set_xlabel('Speed threshold')
         ax.set_ylabel('Proportion of follow looks')
         ax.set_ylim(0, 1)
@@ -147,8 +149,6 @@ class Plotter:
 
     def plot_error_phase(self):
         '''Plot the speed and follow error on one figure, as a phase plane.'''
-        colors = 'krbgmcy'
-
         for s, step in enumerate(self.steps):
             pl.figure()
             ax = pl.subplot(111)
@@ -156,7 +156,7 @@ class Plotter:
                 _, follow, speed, _ = self.for_condition(step, threshold)
                 ax.plot(follow.mean(axis=0),
                         speed.mean(axis=0),
-                        '%c-' % colors[t],
+                        '%c-' % COLORS[t],
                         label='Speed threshold %s' % threshold,
                         alpha=0.7)
 
@@ -173,22 +173,29 @@ class Plotter:
     def plot_error_time(self):
         '''Plot the speed and follow error on one figure, using two axes.'''
         for times, follow, speed, _ in self.each_condition('error'):
+            ax = pl.gca()
             n = np.sqrt(len(follow))
 
-            lf = pl.errorbar(times, follow.mean(axis=0), yerr=follow.std(axis=0) / n, color='b')
-            pl.ylabel('Follow Error (m)')
-            pl.ylim(*eval(self.opts.follow))
-            pl.xlim(times[0], times[-1])
+            m = follow.mean(axis=0)
+            e = follow.std(axis=0) / n
+            lf = ax.plot(times, m, color='b')
+            ax.fill_between(times, m - e, m + e, color='b', alpha=0.3, lw=0)
+            ax.set_ylabel('Follow Error (m)')
+            ax.set_ylim(*eval(self.opts.follow))
+            ax.set_xlim(times[0], times[-1])
 
-            pl.twinx()
+            ax = pl.twinx()
 
-            ls = pl.errorbar(times, speed.mean(axis=0), yerr=speed.std(axis=0) / n, color='g')
-            pl.ylabel('Speed Error (m/s)')
-            pl.ylim(*eval(self.opts.speed))
-            pl.xlim(times[0], times[-1])
+            m = speed.mean(axis=0)
+            e = speed.std(axis=0) / n
+            ls = ax.plot(times, m, color='g')
+            ax.fill_between(times, m - e, m + e, color='g', alpha=0.3, lw=0)
+            ax.set_ylabel('Speed Error (m/s)')
+            ax.set_ylim(*eval(self.opts.speed))
+            ax.set_xlim(times[0], times[-1])
+            ax.set_xlabel('Time (s)')
 
             pl.grid(True)
-            pl.xlabel('Time (s)')
             pl.legend((lf, ls), ('Follow', 'Speed'), loc='lower right')
 
     def plot_look_durations(self):
