@@ -86,9 +86,9 @@ class Plotter:
     def savefig(self, name, step=None, threshold=None):
         if self.opts.prefix:
             if step is not None:
-                name = 's%s-%s' % (step, name)
+                name = '%s-step%s' % (name, step)
             if threshold is not None:
-                name = 't%s-%s' % (threshold, name)
+                name = '%s-threshold%s' % (name, threshold)
             filename = os.path.join(
                 self.opts.prefix, '%s.%s' % (name, self.opts.extension))
             logging.info('saving %s', filename)
@@ -100,26 +100,26 @@ class Plotter:
 
         ax = pl.subplot(122)
         im = ax.imshow(
-            np.sqrt((self.runs[:, :, :, :, FOLLOW] ** 2).mean(axis=-1).mean(axis=-1)),
+            np.sqrt((self.runs[:, :, :, :, FOLLOW] ** 2).mean(axis=-1).mean(axis=-1)).T,
             interpolation='nearest')
         ax.set_xticks(range(len(self.steps)))
         ax.set_xticklabels(self.steps)
         ax.set_xlabel('Speed step size (m/s)')
         ax.set_yticks(range(len(self.thresholds)))
-        ax.set_yticklabels(thresholds)
+        ax.set_yticklabels(self.thresholds)
         ax.set_ylabel('Speed threshold (m/s)')
         ax.set_title('Follow RMSE (m)')
         pl.colorbar(im, ax=ax)
 
         ax = pl.subplot(121)
         im = ax.imshow(
-            np.sqrt((self.runs[:, :, :, :, SPEED] ** 2).mean(axis=-1).mean(axis=-1)),
+            np.sqrt((self.runs[:, :, :, :, SPEED] ** 2).mean(axis=-1).mean(axis=-1)).T,
             interpolation='nearest')
         ax.set_xticks(range(len(self.steps)))
         ax.set_xticklabels(self.steps)
         ax.set_xlabel('Speed step size (m/s)')
         ax.set_yticks(range(len(self.thresholds)))
-        ax.set_yticklabels(thresholds)
+        ax.set_yticklabels(self.thresholds)
         ax.set_ylabel('Speed threshold (m/s)')
         ax.set_title('Speed RMSE (m)')
         pl.colorbar(im, ax=ax)
@@ -133,9 +133,9 @@ class Plotter:
         ax = pl.subplot(111)
         for s, step in enumerate(self.steps):
             d = self.runs[s, :, :, :, MODULE].mean(axis=-1)
-            ax.errorbar(THRESHOLDS,
+            ax.errorbar(self.thresholds,
                         d.mean(axis=-1),
-                        d.std(axis=-1) / numpy.sqrt(d.shape[-1]),
+                        d.std(axis=-1) / np.sqrt(d.shape[-1]),
                         label='Speed noise %s' % step)
         ax.set_xlabel('Speed threshold')
         ax.set_ylabel('Proportion of follow looks')
@@ -157,14 +157,14 @@ class Plotter:
                 ax.plot(follow.mean(axis=0),
                         speed.mean(axis=0),
                         '%c-' % colors[t],
-                        label=str(threshold),
+                        label='Speed threshold %s' % threshold,
                         alpha=0.7)
 
             pl.xlim(*eval(self.opts.follow))
             pl.xlabel('Follow Error (m)')
             pl.ylim(*eval(self.opts.speed))
             pl.ylabel('Speed Error (m/s)')
-            pl.title('Speed step size %s' % step)
+            pl.title('Speed noise %s' % step)
             pl.grid(True)
             pl.legend()
 
@@ -195,8 +195,9 @@ class Plotter:
         '''Plot histograms of the interlook intervals for the two modules.'''
         for _, _, _, looks in self.each_condition('look-durations'):
             intervals = [[], []]
-            for module, frames in itertools.groupby(looks):
-                intervals[module].append(len(frames))
+            for look in looks:
+                for module, frames in itertools.groupby(look):
+                    intervals[int(module)].append(len(list(frames)))
             pl.hist(intervals, bins=range(1, 21), label=('Speed', 'Follow'))
             pl.xlabel('Look duration (x 1/3 second)')
             pl.ylabel('Look count')
@@ -205,13 +206,20 @@ class Plotter:
 
 
 def main(opts, args):
+    plotter = Plotter(opts)
+
+    if not args:
+        logging.error('give one or more of these plots as commands:')
+        for s in sorted(dir(plotter)):
+            if s.startswith('plot_'):
+                logging.info(s.replace('plot_', '- '))
+        return
+
     if opts.prefix:
         try:
             os.makedirs(opts.prefix)
         except:
             pass
-
-    plotter = Plotter(opts)
 
     for cmd in args:
         try:
