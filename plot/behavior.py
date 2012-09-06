@@ -12,18 +12,19 @@ runs = []
 intervals = [[], []]
 for filename in sys.argv[2:]:
     data = numpy.loadtxt(filename)
-    #for m, rows in itertools.groupby(data, operator.itemgetter(6)):
-    #    intervals[int(m)].append(len(list(rows)))
+    for m, rows in itertools.groupby(data, operator.itemgetter(6)):
+        intervals[int(m)].append(len(list(rows)))
     runs.append(data)
 runs = numpy.asarray(runs)
 
-stride = 3
+begin = 30
+stride = 11
 n = runs.shape[0]  # n is the number of runs for each scenario.
-t = numpy.arange(runs.shape[1])[::stride] / 3.  # t is the time steps for each run.
+t = numpy.arange(runs.shape[1])[begin::stride] / 3.  # t is the time steps for each run.
 s = numpy.sqrt(n)
 
-follow = runs[:, ::stride, 1]
-speed = runs[:, ::stride, 2]
+follow = runs[:, begin::stride, 1]
+speed = runs[:, begin::stride, 2]
 
 print sys.argv[1], '-- loaded data', runs.shape
 
@@ -40,10 +41,8 @@ pl.clf()
 
 # plot the speed and follow error on one figure, as a phase plane
 
-pl.errorbar(follow.mean(axis=0), speed.mean(axis=0),
-            xerr=follow.std(axis=0) / s, yerr=speed.std(axis=0) / s,
-            fmt='.', mew=0)
-pl.xlim(-5, 20)
+pl.plot(follow.mean(axis=0), speed.mean(axis=0), 'k-')
+pl.xlim(-5, 15)
 pl.xlabel('Follow Error (m)')
 pl.ylim(-3, 1)
 pl.ylabel('Speed Error (m/s)')
@@ -56,7 +55,7 @@ pl.clf()
 
 lf = pl.errorbar(t, follow.mean(axis=0), yerr=follow.std(axis=0) / s, color='b')
 pl.ylabel('Follow Error (m)')
-pl.ylim(-5, 20)
+pl.ylim(-5, 15)
 pl.xlim(t[0], t[-1])
 
 pl.twinx()
@@ -67,9 +66,8 @@ ls = pl.errorbar(t, speed.mean(axis=0), yerr=speed.std(axis=0) / s, color='g')
 pl.ylabel('Speed Error (m/s)')
 pl.ylim(-3, 1)
 pl.xlim(t[0], t[-1])
-pl.grid(True)
 
-pl.title('Task Error')
+pl.grid(True)
 pl.xlabel('Time (s)')
 pl.legend((lf, ls), ('Follow', 'Speed'), loc='lower right')
 
