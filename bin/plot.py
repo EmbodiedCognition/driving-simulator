@@ -43,30 +43,38 @@ def keys(f):
     return float(m.group(1)), float(m.group(2))
 
 
-def load(opts):
-    '''Load the logged experiment data from files on disk.'''
-    steps = eval(opts.steps)
-    thresholds = eval(opts.thresholds)
-    logs = sorted(glob.glob(os.path.join(opts.data, '*.log')))
-    runs = [[[] for _ in thresholds] for _ in steps]
-    for (t, s), fs in itertools.groupby(logs, key=keys):
-        try:
-            condition = runs[steps.index(s)][thresholds.index(t)]
-        except:
-            print 'skipping condition', t, s
-            continue
-        condition.extend(np.loadtxt(f) for f in fs)
-    runs = np.asarray(runs)
-    logging.info('loaded data %s', runs.shape)
-    return runs
-
-
 class Plotter:
     def __init__(self, opts):
-        self.runs = load(opts)
         self.steps = eval(opts.steps)
         self.thresholds = eval(opts.thresholds)
         self.opts = opts
+        self.runs = None
+
+    def load(self):
+        '''Load the logged experiment data from files on disk.
+
+        The resulting data array has the following dimensions :
+        - steps (number of random walk step sizes in experiments)
+        - thresholds (number of noise thresholds in experiments)
+        - runs (number of simulator runs for each step/threshold condition)
+        - frames (number of frames in each experiment)
+        - fields (number of data fields per frame)
+
+        Run .mean(axis=2), for example, to average across all runs of each
+        condition, or [:, :, :, :, 2].mean(axis=-1) to get the mean error in the
+        speed module over the course of each experiment.
+        '''
+        logs = sorted(glob.glob(os.path.join(self.opts.data, '*.log')))
+        runs = [[[] for _ in self.thresholds] for _ in self.steps]
+        for (t, s), fs in itertools.groupby(logs, key=keys):
+            try:
+                condition = runs[self.steps.index(s)][self.thresholds.index(t)]
+            except:
+                logging.info('skipping condition t = %s, s = %s', t, s)
+                continue
+            condition.extend(np.loadtxt(f)[self.opts.begin::self.opts.stride] for f in fs)
+        self.runs = np.asarray(runs)
+        logging.info('loaded data %s', self.runs.shape)
 
     def each_condition(self, name):
         for s in self.steps:
@@ -79,9 +87,9 @@ class Plotter:
         s = self.steps.index(step)
         t = self.thresholds.index(threshold)
         condition = self.runs[s, t]
-        times = condition[0, self.opts.begin::self.opts.stride, TIME]
-        follow = condition[:, self.opts.begin::self.opts.stride, FOLLOW]
-        speed = condition[:, self.opts.begin::self.opts.stride, SPEED]
+        times = condition[0, :, TIME]
+        follow = condition[:, :, FOLLOW]
+        speed = condition[:, :, SPEED]
         looks = condition[:, :, MODULE]
         return times, follow, speed, looks
 
@@ -146,6 +154,49 @@ class Plotter:
         pl.legend(loc='upper left')
 
         self.savefig('look-proportions')
+
+    def plot_inverse(self):
+        '''Plot log-probabilities of speed module parameters under a softmax model.'''
+        pl.figure()
+
+        _steps = np.tile(self.steps, (len(self.thresholds), 1)).T
+        _thresholds = np.tile(self.thresholds, (len(self.steps), 1))
+
+        dt = 20
+        no = 0
+        wait = np.zeros(2.)
+        logps = np.zeros_like(_steps)
+        for s, step in enumerate(self.steps):
+            for t, threshold in enumerate(self.thresholds):
+                no += 1
+                logps[:] = 0
+                for run in self.runs[s, t]:
+                    wait[:] = 0
+                    for frame in run:
+                        wait[int(frame[-1])] = 0
+                        wait += dt
+                        lps = _steps * np.sqrt(wait[0]) - _thresholds
+                        lpf = 0.1 * np.sqrt(wait[1]) - 1
+                        logps += lps - np.logaddexp(lps, lpf)
+
+                ax = pl.subplot(len(self.steps), len(self.thresholds), no)
+                ax.imshow(0 - logps.T, interpolation='nearest', vmin=0)
+                if s == 0:
+                    ax.set_title(str(threshold))
+                if s == len(self.steps) - 1:
+                    ax.set_xticks(range(len(self.steps)))
+                    ax.set_xticklabels(self.steps)
+                else:
+                    ax.set_xticks([])
+                if t == 0:
+                    ax.set_yticks(range(len(self.thresholds)))
+                    ax.set_yticklabels(self.thresholds)
+                    ax.set_ylabel(str(step))
+                else:
+                    ax.set_yticks([])
+                logging.info('step %s, threshold %s', step, threshold)
+
+        self.savefig('inverse')
 
     def plot_error_phase(self):
         '''Plot the speed and follow error on one figure, as a phase plane.'''
@@ -221,6 +272,8 @@ def main(opts, args):
             if s.startswith('plot_'):
                 logging.info(s.replace('plot_', '- '))
         return
+
+    plotter.load()
 
     if opts.prefix:
         try:
