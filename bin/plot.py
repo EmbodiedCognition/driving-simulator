@@ -31,9 +31,11 @@ FLAGS.add_option('--follow', default='-5,15', metavar='A,B',
                  help='restrict follow error axes to the interval [A,B]')
 
 TIME = 0
-FOLLOW = 1
-SPEED = 2
-MODULE = 6
+SPEED_ERR = 1
+FOLLOW_ERR = 2
+SPEED_RMSE = 3
+FOLLOW_RMSE = 4
+LOOK = 5
 
 COLORS = 'krbgmcy'
 
@@ -88,9 +90,9 @@ class Plotter:
         t = self.thresholds.index(threshold)
         condition = self.runs[s, t]
         times = condition[0, :, TIME]
-        follow = condition[:, :, FOLLOW]
-        speed = condition[:, :, SPEED]
-        looks = condition[:, :, MODULE]
+        speed = condition[:, :, SPEED_ERR]
+        follow = condition[:, :, FOLLOW_ERR]
+        looks = condition[:, :, LOOK]
         return times, follow, speed, looks
 
     def savefig(self, name, step=None, threshold=None):
@@ -108,22 +110,9 @@ class Plotter:
         '''Plot heat maps of RMSE in all conditions.'''
         pl.figure()
 
-        ax = pl.subplot(122)
-        im = ax.imshow(
-            np.sqrt((self.runs[:, :, :, :, FOLLOW] ** 2).mean(axis=-1).mean(axis=-1)).T,
-            interpolation='nearest')
-        ax.set_xticks(range(len(self.steps)))
-        ax.set_xticklabels(self.steps)
-        ax.set_xlabel('Speed step size (m/s)')
-        ax.set_yticks(range(len(self.thresholds)))
-        ax.set_yticklabels(self.thresholds)
-        ax.set_ylabel('Speed threshold (m/s)')
-        ax.set_title('Follow RMSE (m)')
-        pl.colorbar(im, ax=ax)
-
         ax = pl.subplot(121)
         im = ax.imshow(
-            np.sqrt((self.runs[:, :, :, :, SPEED] ** 2).mean(axis=-1).mean(axis=-1)).T,
+            np.sqrt((self.runs[:, :, :, :, SPEED_ERR] ** 2).mean(axis=-1).mean(axis=-1)).T,
             interpolation='nearest')
         ax.set_xticks(range(len(self.steps)))
         ax.set_xticklabels(self.steps)
@@ -134,6 +123,19 @@ class Plotter:
         ax.set_title('Speed RMSE (m)')
         pl.colorbar(im, ax=ax)
 
+        ax = pl.subplot(122)
+        im = ax.imshow(
+            np.sqrt((self.runs[:, :, :, :, FOLLOW_ERR] ** 2).mean(axis=-1).mean(axis=-1)).T,
+            interpolation='nearest')
+        ax.set_xticks(range(len(self.steps)))
+        ax.set_xticklabels(self.steps)
+        ax.set_xlabel('Speed step size (m/s)')
+        ax.set_yticks(range(len(self.thresholds)))
+        ax.set_yticklabels(self.thresholds)
+        ax.set_ylabel('Speed threshold (m/s)')
+        ax.set_title('Follow RMSE (m)')
+        pl.colorbar(im, ax=ax)
+
         self.savefig('rmse')
 
     def plot_look_proportions(self):
@@ -142,7 +144,7 @@ class Plotter:
 
         ax = pl.subplot(111)
         for s, step in enumerate(self.steps):
-            d = self.runs[s, :, :, :, MODULE].mean(axis=-1)
+            d = self.runs[s, :, :, :, LOOK].mean(axis=-1)
             m = d.mean(axis=-1)
             e = d.std(axis=-1) / np.sqrt(d.shape[-1])
             ax.plot(self.thresholds, m, label='Speed noise %s' % step, color=COLORS[s])
@@ -162,25 +164,27 @@ class Plotter:
         _steps = np.tile(self.steps, (len(self.thresholds), 1)).T
         _thresholds = np.tile(self.thresholds, (len(self.steps), 1))
 
-        dt = 20
-        no = 0
-        wait = np.zeros(2.)
-        logps = np.zeros_like(_steps)
+        plotno = 0
         for s, step in enumerate(self.steps):
             for t, threshold in enumerate(self.thresholds):
-                no += 1
-                logps[:] = 0
+                plotno += 1
+                logps = np.zeros_like(_steps)
+                n = 0
                 for run in self.runs[s, t]:
-                    wait[:] = 0
+                    wait = np.zeros(2.)
                     for frame in run:
-                        wait[int(frame[-1])] = 0
-                        wait += dt
+                        m = int(frame[LOOK])
                         lps = _steps * np.sqrt(wait[0]) - _thresholds
                         lpf = 0.1 * np.sqrt(wait[1]) - 1
-                        logps += lps - np.logaddexp(lps, lpf)
+                        logps += [lps, lpf][m] - np.logaddexp(lps, lpf)
+                        n += 1
+                        wait[m] = 0
+                        wait += 20
 
-                ax = pl.subplot(len(self.steps), len(self.thresholds), no)
-                ax.imshow(0 - logps.T, interpolation='nearest', vmin=0)
+                logps = -logps / n
+                ax = pl.subplot(len(self.steps), len(self.thresholds), plotno)
+                ax.imshow(logps.T, interpolation='nearest', vmin=0, vmax=5)
+                ax.scatter(*np.unravel_index(logps.argmin(), logps.shape), c='k', lw=0)
                 if s == 0:
                     ax.set_title(str(threshold))
                 if s == len(self.steps) - 1:
