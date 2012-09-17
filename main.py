@@ -63,7 +63,7 @@ class Simulator:
         self.modules = [
             modules.Speed(threshold=opts.speed_threshold, step=opts.speed_step),
             modules.Follow(threshold=opts.follow_threshold, step=opts.follow_step),
-            modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
+            #modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
             ]
 
         # construct cars to either drive by module, or to follow lanes.
@@ -110,9 +110,12 @@ class Simulator:
                 raise StopIteration
 
         if not self.frame % self.look_interval:
-            self.active_module = self.agent.observe(self.leader)
-            print '%.2f' % (self.frame * self.dt),
-            print ' '.join('%.3f' % x for x in self.report())
+            self.active_module = self.agent.select_by_uncertainty()
+            print self.frame * self.dt,
+            for x in self.report():
+                print x,
+            print self.active_module
+            self.agent.observe(self.active_module, self.leader)
 
         if self.handles:
             for car, handle in zip(self.cars, self.handles):
@@ -130,18 +133,14 @@ class Simulator:
 
     def report(self):
         '''Return a string capturing the measured state of the simulator.'''
+        yield cars.TARGET_SPEED - self.agent.speed
+
         err = self.leader.target - self.agent.position
         sign = [1, -1][numpy.dot(err, self.agent.velocity) < 0]
         yield sign * numpy.linalg.norm(err)
 
-        yield cars.TARGET_SPEED - self.agent.speed
-
         for m in self.agent.modules:
-            #yield m.rmse
-            #yield m.threshold
-            yield m.uncertainty
-
-        yield self.active_module
+            yield m.rmse
 
 
 def main(simulator):

@@ -132,14 +132,11 @@ class Modular(Car):
             self.position = rng.normal(leader.target, 2)
             self.angle = leader.angle
 
-    def observe(self, leader):
+    def observe(self, module, leader):
         '''Pass the position of the leader to one module for update.'''
-        m = self.select_by_uncertainty()
-        if m == 1:
-            self.modules[2].observe(self, leader)
-        self.modules[m].observe(self, leader)
-        self.observed_module = self.modules[m]
-        return m
+        m = self.modules[module]
+        m.observe(self, leader)
+        self.observed_module = m
 
     def select_by_uncertainty(self):
         '''We sample a module for update proportional to its uncertainty.'''
