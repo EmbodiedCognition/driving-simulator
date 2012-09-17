@@ -1,12 +1,14 @@
 #!/bin/bash
 
+N=${1:-10}
+
 mkdir -p data
 
 for t in 0.1 0.2 0.5 1 2 5 10
 do
     for s in 0.05 0.10 0.20
     do
-        for i in $(seq -w 1 30)
+        for i in $(seq -w $N)
         do
             echo "$t $s $i"
             python main.py \
