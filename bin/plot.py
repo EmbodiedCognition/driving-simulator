@@ -4,6 +4,7 @@ import glob
 import itertools
 import logging
 import numpy as np
+import numpy.random as rng
 import optparse
 import os
 import re
@@ -161,20 +162,24 @@ class Plotter:
         '''Plot log-probabilities of speed module parameters under a softmax model.'''
         pl.figure()
 
-        _steps = np.tile(self.steps, (len(self.thresholds), 1)).T
-        _thresholds = np.tile(self.thresholds, (len(self.steps), 1))
+        #step_space = np.logspace(-0.5, -1.5, 7)
+        #threshold_space = np.logspace(1.1, -1.1, 11)
+        step_space = np.linspace(0.3, 0, 7)
+        threshold_space = np.linspace(12, 0, 11)
+        step_grid = np.tile(step_space, (len(threshold_space), 1)).T
+        threshold_grid = np.tile(threshold_space, (len(step_space), 1))
 
         plotno = 0
         for s, step in enumerate(self.steps):
             for t, threshold in enumerate(self.thresholds):
                 plotno += 1
-                logps = np.zeros_like(_steps)
+                logps = np.zeros_like(step_grid)
                 n = 0
                 for run in self.runs[s, t]:
-                    wait = np.zeros(2.)
+                    wait = np.array([20, 20])
                     for frame in run:
                         m = int(frame[LOOK])
-                        lps = _steps * np.sqrt(wait[0]) - _thresholds
+                        lps = step_grid * np.sqrt(wait[0]) - threshold_grid
                         lpf = 0.1 * np.sqrt(wait[1]) - 1
                         logps += [lps, lpf][m] - np.logaddexp(lps, lpf)
                         n += 1
@@ -184,18 +189,18 @@ class Plotter:
                 logps = -logps / n
                 ax = pl.subplot(len(self.steps), len(self.thresholds), plotno)
                 ax.imshow(logps.T, interpolation='nearest', vmin=0, vmax=5)
-                ax.scatter(*np.unravel_index(logps.argmin(), logps.shape), c='k', lw=0)
+                ax.scatter(*np.unravel_index(logps.argmin(), logps.shape), c='y', lw=0)
                 if s == 0:
-                    ax.set_title(str(threshold))
+                    ax.set_title('Speed threshold %s' % threshold)
                 if s == len(self.steps) - 1:
-                    ax.set_xticks(range(len(self.steps)))
-                    ax.set_xticklabels(self.steps)
+                    ax.set_xticks(range(len(step_space))[::2])
+                    ax.set_xticklabels(['%.1f' % z for z in step_space[::2]])
                 else:
                     ax.set_xticks([])
                 if t == 0:
-                    ax.set_yticks(range(len(self.thresholds)))
-                    ax.set_yticklabels(self.thresholds)
-                    ax.set_ylabel(str(step))
+                    ax.set_ylabel('Speed step %s' % step)
+                    ax.set_yticks(range(len(threshold_space))[::2])
+                    ax.set_yticklabels(['%.1f' % z for z in threshold_space[::2]])
                 else:
                     ax.set_yticks([])
                 logging.info('step %s, threshold %s', step, threshold)
