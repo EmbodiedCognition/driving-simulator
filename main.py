@@ -23,15 +23,15 @@ FLAGS.add_option('-t', '--trace', action='store_true',
 g = optparse.OptionGroup(FLAGS, 'Modules')
 g.add_option('-f', '--follow-threshold', type=float, default=1, metavar='S',
              help='set the threshold error for the follow module to S')
-g.add_option('-F', '--follow-step', type=float, default=0.1, metavar='R',
+g.add_option('-F', '--follow-step', type=float, default=0.2, metavar='R',
              help='set the random-walk step size for the follow module to R')
-g.add_option('-l', '--lane-threshold', type=float, default=0.1, metavar='S',
+g.add_option('-l', '--lane-threshold', type=float, default=1, metavar='S',
              help='set the threshold variance for the lane module to S')
-g.add_option('-L', '--lane-step', type=float, default=0.01, metavar='R',
+g.add_option('-L', '--lane-step', type=float, default=0.2, metavar='R',
              help='set the step size for the lane module to R')
 g.add_option('-s', '--speed-threshold', type=float, default=1, metavar='S',
              help='set the threshold variance for the speed module to S')
-g.add_option('-S', '--speed-step', type=float, default=0.1, metavar='R',
+g.add_option('-S', '--speed-step', type=float, default=0.2, metavar='R',
              help='set the step size for the speed module to R')
 FLAGS.add_option_group(g)
 
@@ -50,7 +50,6 @@ class Simulator:
         self.frame = 0
         self.dt = 1. / opts.control_rate
         self.look_interval = int(opts.control_rate / opts.fixation_rate)
-        self.active_module = 0
 
         # either read in lane data from file, or make curvy circular test lanes.
         #points = lanes.clover(radius=100., sample_rate=opts.control_rate, speed=8.)
@@ -61,9 +60,9 @@ class Simulator:
 
         # construct modules to control the agent car.
         self.modules = [
-            modules.Speed(threshold=opts.speed_threshold, step=opts.speed_step),
-            modules.Follow(threshold=opts.follow_threshold, step=opts.follow_step),
-            #modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
+            modules.Speed(threshold=opts.speed_threshold, noise=opts.speed_step),
+            modules.Follow(threshold=opts.follow_threshold, noise=opts.follow_step),
+            modules.Lane(self.lanes, threshold=opts.lane_threshold, noise=opts.lane_step),
             ]
 
         # construct cars to either drive by module, or to follow lanes.
@@ -110,12 +109,13 @@ class Simulator:
                 raise StopIteration
 
         if not self.frame % self.look_interval:
-            self.active_module = self.agent.select_by_uncertainty()
+            m = self.agent.select_by_uncertainty()
             print self.frame * self.dt,
             for x in self.report():
                 print x,
-            print self.active_module
-            self.agent.observe(self.active_module, self.leader)
+            print m
+
+        self.agent.observe(self.leader)
 
         if self.handles:
             for car, handle in zip(self.cars, self.handles):
@@ -140,7 +140,7 @@ class Simulator:
         yield sign * numpy.linalg.norm(err)
 
         for m in self.agent.modules:
-            yield m.rmse
+            yield m.std
 
 
 def main(simulator):

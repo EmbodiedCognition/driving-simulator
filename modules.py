@@ -57,33 +57,33 @@ class Estimator:
     uncertainty by displacing the particles through a random walk.
     '''
 
-    def __init__(self, threshold, step, particles=10):
+    def __init__(self, threshold, noise, accrual=0.5, particles=10):
         '''Initialize this estimator.
 
         threshold: Indicates the maximum tolerated error in the estimate
           before this estimate becomes a candidate for a look.
-
-        step: The step size for a random walk in measurement error.
-
+        noise: The step size for a random walk in measurement error.
+        accrual: The rate at which observed state information is incorporated
+          into the particle values.
         particles: The number of particles to use for estimating variance.
         '''
+        self._noise = noise
+        self._accrual = accrual
         self._threshold = threshold
-        self._step = step
-        self._value = 0
-        self._errors = numpy.zeros((particles, ), float)
+        self._particles = numpy.zeros((particles, ), float)
 
     def __str__(self):
-        return 'threshold: %s, step: %s' % (self._threshold, self._step)
+        return 'threshold: %s, step: %s' % (self._threshold, self._noise)
 
     @property
-    def value(self):
+    def mean(self):
         '''Get the current estimated value of this parameter.'''
-        return self._value + self._errors[rng.randint(len(self._errors))]
+        return self._particles.mean()
 
     @property
-    def rmse(self):
+    def std(self):
         '''Get the current absolute error of this parameter.'''
-        return numpy.sqrt((self._errors ** 2).sum())
+        return self._particles.std()
 
     @property
     def uncertainty(self):
@@ -92,17 +92,15 @@ class Estimator:
         This value is small for error below the threshold, and large for error
         exceeding the threshold.
         '''
-        return numpy.exp(self.rmse - self._threshold)
+        return numpy.exp(self.std - self._threshold)
 
     def step(self):
         '''Distort the error in our estimate by taking a random step.'''
-        samples = rng.uniform(size=len(self._errors))
-        self._errors += self._step * numpy.where(samples > 0.5, -1, 1)
+        self._particles += self._noise * rng.randn(len(self._particles))
 
     def observe(self, value):
-        '''Reset the estimated value and error to standard values.'''
-        self._value = value
-        self._errors[:] = 0
+        '''Move the estimated value towards observed values.'''
+        self._particles += self._accrual * (value - self._particles)
 
 
 class Module:
@@ -122,6 +120,7 @@ class Module:
 
     def __init__(self, *args, **kwargs):
         self.estimators = dict(self._setup(*args, **kwargs))
+        self.updating = False  # whether this module is receiving updates.
 
     def __str__(self):
         return '%s module\n%s' % (
@@ -131,22 +130,22 @@ class Module:
     @property
     def est_distance(self):
         '''Return the estimated distance for this module, if any.'''
-        return self.estimators['distance'].value
+        return self.estimators['distance'].mean
 
     @property
     def est_speed(self):
         '''Return the estimated speed for this module, if any.'''
-        return self.estimators['speed'].value
+        return self.estimators['speed'].mean
 
     @property
     def est_angle(self):
         '''Return the estimated angle for this module, if any.'''
-        return self.estimators['angle'].value
+        return self.estimators['angle'].mean
 
     @property
-    def rmse(self):
+    def std(self):
         '''Return the uncertainty of the speed estimator.'''
-        return self.estimators[self.KEY].rmse
+        return self.estimators[self.KEY].std
 
     @property
     def threshold(self):
@@ -160,6 +159,8 @@ class Module:
 
     def observe(self, agent, leader):
         '''Update this module given the true states of the agent and leader.'''
+        if not self.updating:
+            return
         values = dict(self._observe(agent, leader))
         for name, est in self.estimators.iteritems():
             est.observe(values.get(name, 0))
@@ -178,11 +179,11 @@ class Speed(Module):
 
     KEY = 'speed'
 
-    def _setup(self, threshold=1, step=0.1):
+    def _setup(self, threshold=1, noise=0.1):
         '''Set up this module with the target speed.'''
         self._pedal = pid_controller(kp=0.5, kd=0.05)
 
-        yield 'speed', Estimator(threshold=threshold, step=step)
+        yield 'speed', Estimator(threshold=threshold, noise=noise)
 
     def _observe(self, agent, leader):
         '''Update the module by observing the actual speed of the agent.'''
@@ -202,15 +203,15 @@ class Follow(Module):
 
     KEY = 'distance'
 
-    def _setup(self, threshold=1, step=0.1, angle_scale=0.1):
+    def _setup(self, threshold=1, noise=0.1, angle_scale=0.1):
         '''Create PID controllers for distance and angle.'''
         self._pedal = pid_controller(kp=0.2, kd=0.1)
         self._steer = pid_controller(kp=0.01)
 
-        yield 'distance', Estimator(threshold=threshold, step=step)
+        yield 'distance', Estimator(threshold=threshold, noise=noise)
         yield 'angle', Estimator(
             threshold=angle_scale * threshold,
-            step=angle_scale * step)
+            noise=angle_scale * noise)
 
         self.ahead = True
 
@@ -234,15 +235,11 @@ class Lane(Module):
 
     KEY = 'angle'
 
-    @property
-    def uncertainty(self):
-        return 0.0
-
-    def _setup(self, lanes, threshold=1, step=0.1):
+    def _setup(self, lanes, threshold=1, noise=0.1):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=0.01)
-        yield 'angle', Estimator(threshold=threshold, step=step)
+        yield 'angle', Estimator(threshold=threshold, noise=noise)
 
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
@@ -256,5 +253,4 @@ class Lane(Module):
 
     def _control(self, dt):
         '''Return the most recent steering signal for getting back to a lane.'''
-        return None, None
         return None, self._steer(self.est_angle, dt)
