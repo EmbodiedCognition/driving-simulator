@@ -11,6 +11,7 @@ st=\$(echo \$1 | cut -d' ' -f3)
 ss=\$(echo \$1 | cut -d' ' -f4)
 lt=\$(echo \$1 | cut -d' ' -f5)
 ls=\$(echo \$1 | cut -d' ' -f6)
+if [ -z "$fs" ]; then exit; fi
 python main.py \
   --follow-threshold 1 \
   --follow-step \$fs \
