@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
+import argparse
 import numpy
-import optparse
 import sys
 
 import cars
@@ -10,30 +10,31 @@ import modules
 
 TAU = 2 * numpy.pi
 
-FLAGS = optparse.OptionParser('Usage: main.py [options] [lane-files]')
-FLAGS.add_option('-g', '--gl', action='store_true',
-                 help='run the simulator with the OpenGL visualization')
-FLAGS.add_option('-r', '--control-rate', type=float, default=60., metavar='N',
-                 help='run the simulation at N Hz')
-FLAGS.add_option('-R', '--fixation-rate', type=int, default=3, metavar='M',
-                 help='schedule fixations at M Hz')
-FLAGS.add_option('-t', '--trace', action='store_true',
-                 help='trace the locations of all cars into agent_xx.txt')
+FLAGS = argparse.ArgumentParser()
+FLAGS.add_argument('-g', '--gl', action='store_true',
+                   help='run the simulator with the OpenGL visualization')
+FLAGS.add_argument('-r', '--control-rate', type=float, default=60., metavar='N',
+                   help='run the simulation at N Hz')
+FLAGS.add_argument('-R', '--fixation-rate', type=int, default=3, metavar='M',
+                   help='schedule fixations at M Hz')
+FLAGS.add_argument('-t', '--trace', action='store_true',
+                   help='trace the locations of all cars into agent_xx.txt')
 
-g = optparse.OptionGroup(FLAGS, 'Modules')
-g.add_option('-f', '--follow-threshold', type=float, default=1, metavar='S',
-             help='set the threshold error for the follow module to S')
-g.add_option('-F', '--follow-step', type=float, default=0.1, metavar='R',
-             help='set the random-walk step size for the follow module to R')
-g.add_option('-l', '--lane-threshold', type=float, default=0.1, metavar='S',
-             help='set the threshold variance for the lane module to S')
-g.add_option('-L', '--lane-step', type=float, default=0.01, metavar='R',
-             help='set the step size for the lane module to R')
-g.add_option('-s', '--speed-threshold', type=float, default=1, metavar='S',
-             help='set the threshold variance for the speed module to S')
-g.add_option('-S', '--speed-step', type=float, default=0.1, metavar='R',
-             help='set the step size for the speed module to R')
-FLAGS.add_option_group(g)
+g = FLAGS.add_argument_group('Modules')
+g.add_argument('-f', '--follow-threshold', type=float, default=1, metavar='S',
+               help='set the threshold error for the follow module to S')
+g.add_argument('-F', '--follow-step', type=float, default=0.2, metavar='R',
+               help='set the random-walk step size for the follow module to R')
+g.add_argument('-l', '--lane-threshold', type=float, default=1, metavar='S',
+               help='set the threshold variance for the lane module to S')
+g.add_argument('-L', '--lane-step', type=float, default=0.2, metavar='R',
+               help='set the step size for the lane module to R')
+g.add_argument('-s', '--speed-threshold', type=float, default=1, metavar='S',
+               help='set the threshold variance for the speed module to S')
+g.add_argument('-S', '--speed-step', type=float, default=0.2, metavar='R',
+               help='set the step size for the speed module to R')
+
+FLAGS.add_argument('lanes', nargs=argparse.REMAINDER)
 
 
 class Simulator:
@@ -44,26 +45,25 @@ class Simulator:
     estimates of world state (if any).
     '''
 
-    def __init__(self, opts, args):
-        self.opts = opts
+    def __init__(self, args):
+        self.args = args
 
         self.frame = 0
-        self.dt = 1. / opts.control_rate
-        self.look_interval = int(opts.control_rate / opts.fixation_rate)
-        self.active_module = 0
+        self.dt = 1. / args.control_rate
+        self.look_interval = int(args.control_rate / args.fixation_rate)
 
         # either read in lane data from file, or make curvy circular test lanes.
-        #points = lanes.clover(radius=100., sample_rate=opts.control_rate, speed=8.)
-        points = lanes.linear(sample_rate=opts.control_rate, speed=10.)
-        if args:
-            points = lanes.read(args)
+        #points = lanes.clover(radius=100., sample_rate=args.control_rate, speed=8.)
+        points = lanes.linear(sample_rate=args.control_rate, speed=10.)
+        if args.lanes:
+            points = lanes.read(args.lanes)
         self.lanes = numpy.array(list(points))
 
         # construct modules to control the agent car.
         self.modules = [
-            modules.Speed(threshold=opts.speed_threshold, step=opts.speed_step),
-            modules.Follow(threshold=opts.follow_threshold, step=opts.follow_step),
-            #modules.Lane(self.lanes, threshold=opts.lane_threshold, step=opts.lane_step),
+            modules.Speed(threshold=args.speed_threshold, noise=args.speed_step),
+            modules.Follow(threshold=args.follow_threshold, noise=args.follow_step),
+            modules.Lane(self.lanes, threshold=args.lane_threshold, noise=args.lane_step),
             ]
 
         # construct cars to either drive by module, or to follow lanes.
@@ -73,7 +73,7 @@ class Simulator:
         self.reset()
 
         self.handles = []
-        if opts.trace:
+        if args.trace:
             self.handles = [
                 open('agent_%02d.path' % i, 'w') for i in range(len(self.cars))]
 
@@ -110,12 +110,13 @@ class Simulator:
                 raise StopIteration
 
         if not self.frame % self.look_interval:
-            self.active_module = self.agent.select_by_uncertainty()
+            m = self.agent.select_by_uncertainty()
             print self.frame * self.dt,
             for x in self.report():
                 print x,
-            print self.active_module
-            self.agent.observe(self.active_module, self.leader)
+            print m
+
+        self.agent.observe(self.leader)
 
         if self.handles:
             for car, handle in zip(self.cars, self.handles):
@@ -140,7 +141,7 @@ class Simulator:
         yield sign * numpy.linalg.norm(err)
 
         for m in self.agent.modules:
-            yield m.rmse
+            yield m.std
 
 
 def main(simulator):
@@ -153,9 +154,9 @@ def main(simulator):
 
 
 if __name__ == '__main__':
-    opts, args = FLAGS.parse_args()
+    args = FLAGS.parse_args()
     run = main
-    if opts.gl:
+    if args.gl:
         import gfx_glumpy
         run = gfx_glumpy.main
-    run(Simulator(opts, args))
+    run(Simulator(args))

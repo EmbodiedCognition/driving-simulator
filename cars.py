@@ -122,7 +122,6 @@ class Modular(Car):
 
     def __init__(self, modules):
         self.modules = modules
-        self.observed_module = self.modules[0]
         self.reset()
 
     def reset(self, leader=None):
@@ -132,11 +131,11 @@ class Modular(Car):
             self.position = rng.normal(leader.target, 2)
             self.angle = leader.angle
 
-    def observe(self, module, leader):
-        '''Pass the position of the leader to one module for update.'''
-        m = self.modules[module]
-        m.observe(self, leader)
-        self.observed_module = m
+    def observe(self, leader):
+        '''Allow the currently-updating module to observe the world.'''
+        for module in self.modules:
+            if module.updating:
+                module.observe(self, leader)
 
     def select_by_uncertainty(self):
         '''We sample a module for update proportional to its uncertainty.'''
@@ -144,17 +143,21 @@ class Modular(Car):
         if w.sum() == 0:
             w = numpy.ones_like(w)
         cdf = w.cumsum()
-        return cdf.searchsorted(rng.uniform(0, cdf[-1]))
+        m = cdf.searchsorted(rng.uniform(0, cdf[-1]))
+        for i, module in enumerate(self.modules):
+            module.updating = i == m
+        return m
 
     def control(self, dt):
         '''Calculate a speed/angle control signal for a time slice dt.'''
         pedal = steer = 0
-        for m in self.modules:
-            p, s = m.control(dt)
-            if m is self.observed_module:
-                pedal += p
-            if s is not None:
-                steer += s
+        for module in self.modules:
+            if module.updating:
+                p, s = module.control(dt)
+                if p is not None:
+                    pedal += p
+                if s is not None:
+                    steer += s
         return (numpy.clip(pedal, -MAX_PEDAL, MAX_PEDAL),
                 numpy.clip(steer, -MAX_STEER, MAX_STEER))
 
