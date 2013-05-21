@@ -20,14 +20,18 @@ import cars
 TAU = 2 * numpy.pi
 
 
-def pid_controller(kp=0., ki=0., kd=0.):
-    '''This function creates a PID controller with the given constants.'''
-    state = {'integral': 0, 'error': 0}
+def pid_controller(kp=0., ki=0., kd=0., r=0.7):
+    '''This function creates a PID controller with the given constants.
+
+    The derivative is smoothed using a moving exponential window with time
+    constant r.
+    '''
+    state = {'p': 0, 'i': 0, 'd': 0}
     def control(error, dt=1):
-        derivative = (error - state['error']) / dt
-        state['error'] = error
-        state['integral'] += error * dt
-        return kp * error + ki * state['integral'] + kd * derivative
+        state['d'] = r * state['d'] + (1 - r) * (error - state['p']) / dt
+        state['i'] += error * dt
+        state['p'] = error
+        return kp * state['p'] + ki * state['i'] + kd * state['d']
     return control
 
 
