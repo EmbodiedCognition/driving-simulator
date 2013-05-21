@@ -109,12 +109,12 @@ class Simulator:
             except cars.EndOfTrack:
                 raise StopIteration
 
+        metrics = []
         if not self.frame % self.look_interval:
             m = self.agent.select_by_uncertainty()
-            print self.frame * self.dt,
-            for x in self.report():
-                print x,
-            print m
+            metrics.append(self.frame * self.dt)
+            metrics.extend(self.report())
+            metrics.append(m)
 
         self.agent.observe(self.leader)
 
@@ -132,6 +132,13 @@ class Simulator:
 
                 print >> handle
 
+        return metrics
+
+    next = step
+
+    def __iter__(self):
+        return self
+
     def report(self):
         '''Return a string capturing the measured state of the simulator.'''
         yield cars.TARGET_SPEED - self.agent.speed
@@ -146,11 +153,11 @@ class Simulator:
 
 def main(simulator):
     '''Run the simulator without a graphical interface.'''
-    while True:
-        try:
-            simulator.step()
-        except StopIteration:
-            break
+    for metrics in iter(simulator):
+        if metrics:
+            for m in metrics:
+                print m,
+            print
 
 
 if __name__ == '__main__':
