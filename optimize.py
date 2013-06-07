@@ -37,7 +37,7 @@ def look_durations(**kwargs):
 def kl(p, q):
     '''Compute KL divergence between distributions p and q.'''
     valid = p != 0  # 0 log 0 is 0, so we discard these elements of p.
-    return (p[valid] * np.log(p[valid] / (q[valid] + 1e-4))).sum()
+    return (p[valid] * np.log(p[valid] / (q[valid] + 1e-9))).sum()
 
 
 def abbrev(s):
@@ -54,9 +54,9 @@ def compare(params, humans):
         return 10  # force all parameters to be positive.
 
     # partition parameters for experimental conditions.
-    st_lo, st_hi, lt, fs_lo, fs_hi, ss_lo, ss_hi, ls = params
+    st_lo, st_hi, fs_lo, fs_hi, ss_lo, ss_hi = params
     def kwargs(cond):
-        kw = dict(lane_threshold=lt, lane_step=ls)
+        kw = dict(lane_threshold=2, lane_step=0.1)
         if 'noise' in cond:
             kw['follow_step'] = fs_hi
             kw['speed_step'] = ss_hi
@@ -115,7 +115,7 @@ def optimize():
                      sum(bins * hum[:, 1]) / hum[:, 1].sum())
 
     logging.info('best params: %s', SO.fmin_powell(
-        compare, (1, 1, 1, 0.1, 0.1, 0.1, 0.1, 0.1), args=(humans, )))
+        compare, (1, 1, 1, 1, 1, 1), args=(humans, )))
 
 
 if __name__ == '__main__':
