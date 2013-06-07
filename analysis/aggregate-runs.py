@@ -16,8 +16,8 @@ from matplotlib import pyplot as plt
 def kl(p, q):
     '''Compute KL(p || q).'''
     logging.debug('%s %s -- %s %s', p.shape, p.sum(), q.shape, q.sum())
-    valid = (p != 0) & (q != 0)
-    return (p[valid] * np.log(p[valid] / q[valid])).sum()
+    valid = p != 0
+    return (p[valid] * np.log(p[valid] / (q[valid] + 1e-10))).sum()
 
 
 def load(pattern, mods, bins=102):
@@ -50,6 +50,8 @@ def main(pattern, modules=3, humans=None):
     looks = load(pattern, mods)
     logging.info('%s: saving %s histograms', pattern, looks.shape)
     np.save(pattern + '.npy', looks)
+    a, b, c = looks.shape
+    np.savetxt(pattern + '.npy.txt', looks.reshape((a, b * c)), fmt='%d')
 
     # normalize bins into probability distributions
     sums = looks.sum(axis=2)
@@ -64,7 +66,7 @@ def main(pattern, modules=3, humans=None):
     colors = ('#111111', '#1f77b4', '#2ca02c', '#9467bd')
     t = np.arange(len(means[0]))
     ax = plt.subplot(111)
-    for i in mods:
+    for i in mods[:2]:
         if humans is not None and humans.shape[1] > i:
             logging.info('%s: [%d] KL to human %.3f', kl(means[i], humans[:, i]))
         k = np.array([kl(means[i], m) for m in pdfs[:, i, :]])
@@ -72,8 +74,9 @@ def main(pattern, modules=3, humans=None):
         mu = means[i]
         sig = stds[i]
         ax.plot(t, mu, '.-', c=colors[i])
-        ax.fill_between(t, mu + sig, mu - sig, color=colors[i], lw=0, alpha=0.5)
+        #ax.fill_between(t, mu + sig, mu - sig, color=colors[i], lw=0, alpha=0.5)
     ax.set_xlim(0, 10)
+    ax.set_ylim(0, 1)
     plt.savefig(pattern + '.pdf', dpi=1200)
 
 
