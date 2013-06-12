@@ -74,7 +74,7 @@ class Estimator:
         self._noise = noise
         self._accrual = accrual
         self._threshold = threshold
-        self._particles = numpy.zeros((particles, ), float)
+        self._particles = rng.randn(particles)
 
     def __str__(self):
         return 'threshold: %s, step: %s' % (self._threshold, self._noise)
@@ -97,6 +97,10 @@ class Estimator:
         exceeding the threshold.
         '''
         return numpy.exp(self.std - self._threshold)
+
+    def sample(self):
+        '''Return a sample from this estimator.'''
+        return rng.normal(self.mean, self.std)
 
     def step(self):
         '''Distort the error in our estimate by taking a random step.'''
@@ -134,31 +138,36 @@ class Module:
     @property
     def est_distance(self):
         '''Return the estimated distance for this module, if any.'''
-        return self.estimators['distance'].mean
+        return self.estimators['distance'].sample()
 
     @property
     def est_speed(self):
         '''Return the estimated speed for this module, if any.'''
-        return self.estimators['speed'].mean
+        return self.estimators['speed'].sample()
 
     @property
     def est_angle(self):
         '''Return the estimated angle for this module, if any.'''
-        return self.estimators['angle'].mean
+        return self.estimators['angle'].sample()
+
+    @property
+    def mean(self):
+        '''Return the mean of the primary estimator.'''
+        return self.estimators[self.KEY].mean
 
     @property
     def std(self):
-        '''Return the uncertainty of the speed estimator.'''
+        '''Return the uncertainty of the primary estimator.'''
         return self.estimators[self.KEY].std
 
     @property
     def threshold(self):
-        '''Return the uncertainty of the speed estimator.'''
+        '''Return the uncertainty of the primary estimator.'''
         return self.estimators[self.KEY]._threshold
 
     @property
     def uncertainty(self):
-        '''Return the uncertainty of the speed estimator.'''
+        '''Return the uncertainty of the primary estimator.'''
         return self.estimators[self.KEY].uncertainty
 
     def observe(self, agent, leader):
@@ -183,11 +192,11 @@ class Speed(Module):
 
     KEY = 'speed'
 
-    def _setup(self, threshold=1, noise=0.1):
+    def _setup(self, threshold=1, noise=0.1, accrual=0.3):
         '''Set up this module with the target speed.'''
         self._pedal = pid_controller(kp=0.5, kd=0.05)
 
-        yield 'speed', Estimator(threshold=threshold, noise=noise)
+        yield 'speed', Estimator(threshold=threshold, noise=noise, accrual=accrual)
 
     def _observe(self, agent, leader):
         '''Update the module by observing the actual speed of the agent.'''
@@ -207,12 +216,12 @@ class Follow(Module):
 
     KEY = 'distance'
 
-    def _setup(self, threshold=1, noise=0.1, angle_scale=0.1):
+    def _setup(self, threshold=1, noise=0.1, angle_scale=0.1, accrual=0.3):
         '''Create PID controllers for distance and angle.'''
         self._pedal = pid_controller(kp=0.2, kd=0.1)
         self._steer = pid_controller(kp=0.01)
 
-        yield 'distance', Estimator(threshold=threshold, noise=noise)
+        yield 'distance', Estimator(threshold=threshold, noise=noise, accrual=accrual)
         yield 'angle', Estimator(
             threshold=angle_scale * threshold,
             noise=angle_scale * noise)
@@ -239,11 +248,11 @@ class Lane(Module):
 
     KEY = 'angle'
 
-    def _setup(self, lanes, threshold=1, noise=0.1):
+    def _setup(self, lanes, threshold=1, noise=0.1, accrual=0.3):
         '''Set up this module by providing the locations of lanes.'''
         self.lanes = numpy.asarray(lanes)
         self._steer = pid_controller(kp=0.01)
-        yield 'angle', Estimator(threshold=threshold, noise=noise)
+        yield 'angle', Estimator(threshold=threshold, noise=noise, accrual=accrual)
 
     def _observe(self, agent, leader):
         '''Calculate the angle to the closest lane position.'''
