@@ -34,11 +34,11 @@ mkdir -p data
 
 # use xargs to run as many jobs in parallel as we have cores on this machine.
 for i in $(seq -w $N); do
-for fs in 0.05 0.5; do
+for fs in 0.5 0.05 0.0; do
 for st in 1 3; do
-for ss in 0.05 0.5; do
+for ss in 0.5 0.05 0.0; do
 for lt in 5; do
-for ls in 0.05; do
+for ls in 0.5 0.05 0.0; do
 echo -ne "$i $fs $st $ss $lt $ls\0 "
 done; done; done; done; done; done | xargs -P$(nproc) -L1 -0 $SCRIPT
 
