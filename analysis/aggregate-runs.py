@@ -8,6 +8,7 @@ import itertools
 import logging
 import numpy as np
 import plac
+import scipy.interpolate as SI
 import sys
 
 from matplotlib import pyplot as plt
@@ -63,20 +64,34 @@ def main(pattern, modules=3, humans=None):
     stds = pdfs.std(axis=0)
 
     # compute kl distr between individual runs and group mean; plot histograms
-    colors = ('#111111', '#1f77b4', '#2ca02c', '#9467bd')
-    t = np.arange(len(means[0]))
+    colors = ('#2ca02c', '#1f77b4', '#9467bd')
+    shapes = 'so'
+    t = np.arange(len(means[0])).astype(float)
+    tt = np.linspace(0, t[-1], t[-1] * 11)
     ax = plt.subplot(111)
     for i in mods[:2]:
         if humans is not None and humans.shape[1] > i:
             logging.info('%s: [%d] KL to human %.3f', kl(means[i], humans[:, i]))
+
         k = np.array([kl(means[i], m) for m in pdfs[:, i, :]])
         logging.info('%s: [%d] KL to mean %.3f +/- %.4f', pattern, i, k.mean(), k.std())
         mu = means[i]
-        sig = stds[i]
-        ax.plot(t, mu, '.-', c=colors[i])
-        #ax.fill_between(t, mu + sig, mu - sig, color=colors[i], lw=0, alpha=0.5)
-    ax.set_xlim(0, 10)
+        sem = stds[i] / np.sqrt(len(pdfs))
+
+        ax.plot(t * 0.3, mu, '%s-' % shapes[i], c=colors[i], mew=0)
+
+        #above = SI.UnivariateSpline(t, mu + sem)
+        #below = SI.UnivariateSpline(t, mu - sem)
+        #ax.fill_between(tt * 0.3, above(tt), below(tt), color=colors[i], lw=0, alpha=0.5)
+
+        #ax.fill_between(t * 0.3, mu + sem, mu - sem, color=colors[i], lw=0, alpha=0.5)
+
+    ax.set_xlim(0, 3)
+    ax.set_xticks(np.linspace(0, 3, 4))
     ax.set_ylim(0, 1)
+    ax.set_yticks(np.linspace(0, 1, 3))
+    plt.gcf().set_size_inches(3, 2)
+    plt.tight_layout()
     plt.savefig(pattern + '.pdf', dpi=1200)
 
 
