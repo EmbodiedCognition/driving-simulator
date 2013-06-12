@@ -152,8 +152,8 @@ class Modular(Car):
         '''Calculate a speed/angle control signal for a time slice dt.'''
         pedal = steer = 0
         for module in self.modules:
+            p, s = module.control(dt)
             if module.updating:
-                p, s = module.control(dt)
                 if p is not None:
                     pedal += p
                 if s is not None:
