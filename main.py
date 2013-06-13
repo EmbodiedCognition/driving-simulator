@@ -182,7 +182,7 @@ def main(simulator):
     for j, (title, color) in enumerate(
         (('speed', '#111111'), ('follow', '#1f77b4'), ('lane', '#2ca02c'))):
         ax = plt.subplot(3, 1, j + 1)
-        points = frames[O:O + len(I), j]
+        points = frames[O:O + len(I), j] - cars.TARGET_SPEED * (j == 0)
         threshold = getattr(simulator.args, '%s_threshold' % title)
         means = points.mean(axis=-1)
         stds = points.std(axis=-1)
@@ -194,7 +194,7 @@ def main(simulator):
             prev = m
 
         ax.fill_between(T, means + threshold, means - threshold,
-                        color=color, alpha=0.3, linewidth=0)
+                        color=color, alpha=0.2, linewidth=0)
 
         for k in range(frames.shape[2]):
             ax.scatter(T, points[:, k], alpha=0.2, lw=0, color=color)
@@ -218,11 +218,13 @@ def main(simulator):
         if j == 2:
             ax.xaxis.tick_bottom()
             ax.spines['bottom'].set_position(('outward', 6))
-            ax.set_xlabel('Simulation Frame')
+            ax.set_xlabel('Seconds')
         else:
             ax.spines['bottom'].set_color('none')
             ax.set_xticks([])
 
+    plt.gcf().set_size_inches(8, 5)
+    plt.savefig('simulator-state-estimates.pdf', dpi=1200)
     plt.show()
 
 
