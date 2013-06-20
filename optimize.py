@@ -9,6 +9,7 @@ import scipy.optimize as SO
 
 import main
 
+BINS = 10  # number of bins to include in KL comparison
 CONDITIONS = ('follow', 'follow+noise', 'speed', 'speed+noise')
 
 
@@ -16,14 +17,15 @@ Args = collections.namedtuple(
     'Arguments',
     'control_rate fixation_rate trace lanes '
     'follow_threshold speed_threshold lane_threshold '
-    'follow_step speed_step lane_step ')
+    'follow_step speed_step lane_step '
+    'follow_accrual speed_accrual lane_accrual ')
 
 def look_durations(**kwargs):
     '''Count up look durations from the simulator at these parameters.'''
     looks = [0], [0], [0]
     prev = 0
     duration = 0
-    for metrics in main.Simulator(Args(60., 3, False, None, 1, **kwargs)):
+    for metrics, _ in main.Simulator(Args(60., 3, False, None, **kwargs)):
         if not metrics: continue
         module = metrics[-1]
         if prev != module:
@@ -43,42 +45,46 @@ def kl(p, q):
 def abbrev(s):
     '''Return a string with abbreviated simulator-specific terms.'''
     for a, b in (('follow', 'f'), ('speed', 's'), ('lane', 'l'),
-                 ('noise', 'n'), ('threshold', 't'), ('step', 's')):
+                 ('noise', 'n'), ('threshold', 't'), ('step', 's'),
+                 ('accrual', 'a')):
         s = s.replace(a, b)
     return s
 
 
 def compare(params, humans):
     '''Compare simulated look durations with human target look durations.'''
-    if not all(p > 0 for p in params):
+    if not all(0 < p < m for p, m in zip(params, MAXIMA)):
         return 10  # force all parameters to be positive.
 
     # partition parameters for experimental conditions.
-    st_lo, st_hi, fs_lo, fs_hi, ss_lo, ss_hi = params
+    (st_lo, st_hi, ft, ss_lo, ss_hi, fs, sa, fa) = params
+
     def kwargs(cond):
-        kw = dict(lane_threshold=2, lane_step=0.1)
-        if 'noise' in cond:
-            kw['follow_step'] = fs_hi
-            kw['speed_step'] = ss_hi
-        else:
-            kw['follow_step'] = fs_lo
-            kw['speed_step'] = ss_lo
+        kw = dict(speed_accrual=sa, follow_accrual=fa, lane_accrual=0.1,
+                  follow_threshold=ft, lane_threshold=10,
+                  follow_step=fs, lane_step=0,
+                  )
+        kw['speed_step'] = ss_hi if 'noise' in cond else ss_lo
         kw['speed_threshold'] = st_hi if 'speed' in cond else st_lo
         return kw
 
     # run simulations and compute simulated to human kl divergence.
     total_kl = 0
-    bins = np.arange(humans.shape[1] + 1)
     for i, (speedo, leader, _) in enumerate(joblib.Parallel(n_jobs=4)(
             joblib.delayed(look_durations)(**kwargs(n)) for n in CONDITIONS)):
+
         # concatenate and normalize look histogram from simulation.
-        distro = np.concatenate([
-            np.histogram(speedo, bins=bins)[0],
-            np.histogram(leader, bins=bins)[0]]).astype(float)
+        speedo_hist = np.histogram(speedo, bins=range(102))[0]
+        leader_hist = np.histogram(leader, bins=range(102))[0]
+        distro = np.concatenate([speedo_hist[:BINS], [speedo_hist[BINS:].sum()],
+                                 leader_hist[:BINS], [leader_hist[BINS:].sum()],
+                                 ]).astype(float)
         distro /= distro.sum()
 
         # concatenate and normalize look histogram from human data.
-        target = np.concatenate([humans[i, :, 0], humans[i, :, 1]]).astype(float)
+        target = np.concatenate([humans[i, :BINS, 0], [humans[i, BINS:, 0].sum()],
+                                 humans[i, :BINS, 1], [humans[i, BINS:, 1].sum()],
+                                 ]).astype(float)
         target /= target.sum()
 
         # compute kl divergence between these two quantities.
@@ -92,6 +98,8 @@ def compare(params, humans):
     logging.info('total kl: %s', total_kl)
     return total_kl
 
+
+MAXIMA = (10, 10, 10, 2, 2, 2, 1, 1)
 
 def optimize():
     '''Find an optimal parameter setting to match human data.'''
@@ -114,8 +122,24 @@ def optimize():
                      sum(bins * hum[:, 0]) / hum[:, 0].sum(),
                      sum(bins * hum[:, 1]) / hum[:, 1].sum())
 
-    logging.info('best params: %s', SO.fmin_powell(
-        compare, (1, 1, 1, 1, 1, 1), args=(humans, )))
+    guess = (3, 1, 1,       # thresholds
+             0.1, 0.2, 0.1, # step sizes
+             0.1, 0.1,      # accruals
+             )
+    xmin = SO.fmin_powell(
+        func=compare, x0=guess, args=(humans, ))
+    #xmin = SO.anneal(
+    #    func=compare, x0=guess, args=(humans, ),
+    #    schedule='boltzmann',
+    #    lower=np.zeros(len(guess)),
+    #    upper=MAXIMA,
+    #    full_output=True,
+    #    )
+    logging.info('best params:')
+    for p, n in zip(xmin, ('st_lo st_hi ft '
+                           'ss_lo ss_hi fs '
+                           'sa fa ').split()):
+        logging.info('%s: %s', n, p)
 
 
 if __name__ == '__main__':
