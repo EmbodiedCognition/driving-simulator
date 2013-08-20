@@ -9,7 +9,6 @@ import scipy.optimize as SO
 
 import main
 
-BINS = 10  # number of bins to include in KL comparison
 CONDITIONS = ('follow', 'follow+noise', 'speed', 'speed+noise')
 
 
@@ -22,10 +21,10 @@ Args = collections.namedtuple(
 
 def look_durations(**kwargs):
     '''Count up look durations from the simulator at these parameters.'''
-    looks = [0], [0], [0]
+    looks = [], [], []
     prev = 0
-    duration = 0
-    for metrics, _ in main.Simulator(Args(60., 3, False, None, **kwargs)):
+    duration = 1
+    for metrics, _ in main.Simulator(Args(60., 10./3, False, None, **kwargs)):
         if not metrics: continue
         module = metrics[-1]
         if prev != module:
@@ -38,8 +37,7 @@ def look_durations(**kwargs):
 
 def kl(p, q):
     '''Compute KL divergence between distributions p and q.'''
-    valid = p != 0  # 0 log 0 is 0, so we discard these elements of p.
-    return (p[valid] * np.log(p[valid] / (q[valid] + 1e-9))).sum()
+    return (p * np.log(p / q)).sum()
 
 
 def abbrev(s):
@@ -57,14 +55,14 @@ def compare(params, humans):
         return 10  # force all parameters to be positive.
 
     # partition parameters for experimental conditions.
-    (st_lo, st_hi, ft, ss_lo, ss_hi, fs, sa, fa) = params
+    (st_lo, st_hi, ft, ss_lo, ss_hi, fs_lo, fs_hi, sa, fa) = params
 
     def kwargs(cond):
         kw = dict(speed_accrual=sa, follow_accrual=fa, lane_accrual=0.1,
-                  follow_threshold=ft, lane_threshold=10,
-                  follow_step=fs, lane_step=0,
+                  follow_threshold=ft, lane_threshold=10, lane_step=0,
                   )
         kw['speed_step'] = ss_hi if 'noise' in cond else ss_lo
+        kw['follow_step'] = fs_hi if 'noise' in cond else fs_lo
         kw['speed_threshold'] = st_hi if 'speed' in cond else st_lo
         return kw
 
@@ -76,15 +74,11 @@ def compare(params, humans):
         # concatenate and normalize look histogram from simulation.
         speedo_hist = np.histogram(speedo, bins=range(102))[0]
         leader_hist = np.histogram(leader, bins=range(102))[0]
-        distro = np.concatenate([speedo_hist[:BINS], [speedo_hist[BINS:].sum()],
-                                 leader_hist[:BINS], [leader_hist[BINS:].sum()],
-                                 ]).astype(float)
+        distro = 1e-4 + np.concatenate([speedo_hist, leader_hist])
         distro /= distro.sum()
 
         # concatenate and normalize look histogram from human data.
-        target = np.concatenate([humans[i, :BINS, 0], [humans[i, BINS:, 0].sum()],
-                                 humans[i, :BINS, 1], [humans[i, BINS:, 1].sum()],
-                                 ]).astype(float)
+        target = 1e-4 + np.concatenate([humans[i, :, 0], humans[i, :, 1]])
         target /= target.sum()
 
         # compute kl divergence between these two quantities.
@@ -99,7 +93,7 @@ def compare(params, humans):
     return total_kl
 
 
-MAXIMA = (10, 10, 10, 2, 2, 2, 1, 1)
+MAXIMA = (10, 10, 10, 2, 2, 2, 2, 1, 1)
 
 def optimize():
     '''Find an optimal parameter setting to match human data.'''
@@ -122,9 +116,9 @@ def optimize():
                      sum(bins * hum[:, 0]) / hum[:, 0].sum(),
                      sum(bins * hum[:, 1]) / hum[:, 1].sum())
 
-    guess = (3, 1, 1,       # thresholds
-             0.1, 0.2, 0.1, # step sizes
-             0.1, 0.1,      # accruals
+    guess = (1, 1, 1,            # thresholds
+             0.1, 0.1, 0.1, 0.1, # step sizes
+             0.01, 0.01,         # accruals
              )
     xmin = SO.fmin_powell(
         func=compare, x0=guess, args=(humans, ))
@@ -133,11 +127,10 @@ def optimize():
     #    schedule='boltzmann',
     #    lower=np.zeros(len(guess)),
     #    upper=MAXIMA,
-    #    full_output=True,
     #    )
     logging.info('best params:')
     for p, n in zip(xmin, ('st_lo st_hi ft '
-                           'ss_lo ss_hi fs '
+                           'ss_lo ss_hi fs_lo fs_hi '
                            'sa fa ').split()):
         logging.info('%s: %s', n, p)
 

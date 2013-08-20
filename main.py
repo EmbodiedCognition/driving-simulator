@@ -174,6 +174,7 @@ def main(simulator):
             print
             looks.append((metrics[0], metrics[-1]))
 
+    return
     frames = np.asarray(frames)
     O = 400
     I = np.arange(500)
